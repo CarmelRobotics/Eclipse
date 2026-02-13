@@ -6,8 +6,17 @@ package frc.robot;
 
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import frc.robot.subsystems.climb.Climb;
+import frc.robot.subsystems.drive.LocalisedSwerveDrivetrain;
+import frc.robot.subsystems.lintake.Lintake;
+import frc.robot.subsystems.shooter.Shooter;
 
 public class RobotContainer {
+  private final LocalisedSwerveDrivetrain m_drivetrain = new LocalisedSwerveDrivetrain();
+  private final Shooter m_shooter = new Shooter(m_drivetrain::getPose);
+  private final Lintake m_lintake = new Lintake();
+  private final Climb m_climb = new Climb();
+
   public RobotContainer() {
     configureBindings();
   }

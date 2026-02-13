@@ -11,6 +11,7 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -47,7 +48,7 @@ public class LocalisedSwerveDrivetrain extends SwerveDrivetrain<TalonFX, TalonFX
         }
 
         AutoBuilder.configure(
-            () -> getState().Pose,
+            this::getPose,
             this::resetPose,
             () -> getState().Speeds,
             (speeds, feedforwards) -> setControl(
@@ -77,13 +78,21 @@ public class LocalisedSwerveDrivetrain extends SwerveDrivetrain<TalonFX, TalonFX
             : LimelightHelpers::getBotPoseEstimate_wpiBlue_MegaTag2;
     }
 
+    public Pose2d getPose() {
+        return getState().Pose;
+    }
+
     @Override
     public void periodic() {
+        // TODO: Use a curve for distance relationship to standard deviations
+        // TODO: If both limelights see an april tag trust it even more
+        // TODO: We might use a limelight four and limelight three, trust the latter less
+
         for (LimelightInfo limelight : LocalisedSwerveConstants.kLimelights) {
 
             if (LimelightHelpers.getTV(limelight.name())) {
                 LimelightHelpers.SetRobotOrientation(
-                    limelight.name(), getState().Pose.getRotation().getDegrees(), 
+                    limelight.name(), getPose().getRotation().getDegrees(), 
                     getPigeon2().getAngularVelocityZWorld().getValueAsDouble(), 
                     0, 0, 0, 0
                 );
@@ -100,6 +109,6 @@ public class LocalisedSwerveDrivetrain extends SwerveDrivetrain<TalonFX, TalonFX
             }
         }
 
-        m_field.setRobotPose(getState().Pose);
+        m_field.setRobotPose(getPose());
     }
 }
