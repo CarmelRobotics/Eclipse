@@ -33,18 +33,29 @@ public final class LintakeConstants {
         private static final double kMotionMagicJerk = 1600;
 
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-        .withKA(kA).withKD(kD).withKI(kI).withKP(kP).withKS(kS).withKV(kV);
+            .withKA(kA).withKD(kD).withKI(kI).withKP(kP).withKS(kS).withKV(kV);
 
         private static final MotionMagicConfigs MotionMagicConfigs = new MotionMagicConfigs()
-        .withMotionMagicCruiseVelocity(kMotionMagicCruiseVelocity)
-        .withMotionMagicAcceleration(kMotionMagicAcceleration)
-        .withMotionMagicJerk(kMotionMagicJerk);
+            .withMotionMagicCruiseVelocity(kMotionMagicCruiseVelocity)
+            .withMotionMagicAcceleration(kMotionMagicAcceleration)
+            .withMotionMagicJerk(kMotionMagicJerk);
+    }
+
+    private static final class RollerConfigs {
+        private static final double kS = 0.1;
+        private static final double kV = 0.12;
+        private static final double kP = 0.11;
+        private static final double kI = 0;
+        private static final double kD = 0;
+
+        private static final Slot0Configs Slot0Configs = new Slot0Configs()
+            .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
     }
     
     public static final TalonFXConfiguration PinionConfig = new TalonFXConfiguration()
         .withSlot0(PinionConfigs.Slot0Configs).withMotionMagic(PinionConfigs.MotionMagicConfigs);
 
-    public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration();
+    public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
 
     public enum PinionState {
         STOW(0),
