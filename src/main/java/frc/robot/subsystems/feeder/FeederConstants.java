@@ -25,7 +25,7 @@ public final class FeederConstants {
 
     public enum FeederState {
         ZERO(RotationsPerSecond.zero()),
-        SCORE(RotationsPerSecond.of(75));
+        SCORE(RotationsPerSecond.of(100));
 
         public final AngularVelocity velocity;
 

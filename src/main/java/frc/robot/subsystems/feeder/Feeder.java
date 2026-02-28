@@ -22,7 +22,7 @@ public class Feeder extends SubsystemBase {
 
     @Override
     public void periodic() {
-        m_feederMotor.setControl(m_velocityRequest.withVelocity(m_feederState.velocity));
+        m_feederMotor.set(m_feederState.velocity.magnitude());
 
         SmartDashboard.putString(FeederConstants.kFeederStateKey, m_feederState.toString());
     }

@@ -46,8 +46,8 @@ public class Lintake extends SubsystemBase {
     public void periodic() {
         m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
         m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());;
-        m_rollerMotor.set(m_rollerState.velocity.magnitude());
-
+        m_rollerMotor.setVoltage(m_rollerState.velocity);
+        SmartDashboard.putNumber("roller voltage", this.m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
         SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
         SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);

@@ -66,7 +66,7 @@ public final class LintakeConstants {
     public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
 
     public enum PinionState {
-        STOW(-1.25),
+        STOW(-2),
         GROUND(0.1);
 
         public final double position;
@@ -77,14 +77,14 @@ public final class LintakeConstants {
     }
 
     public enum RollerState {
-        ZERO(RotationsPerSecond.zero()),
-        EJECT(RotationsPerSecond.of(100)),
-        INTAKE(RotationsPerSecond.of(-100)),
-        SCORE(RotationsPerSecond.of(100));
+        ZERO(0),
+        EJECT(12),
+        INTAKE(-4),
+        SCORE(12);
 
-        public final AngularVelocity velocity;
+        public final double velocity;
 
-        private RollerState(AngularVelocity velocity) {
+        private RollerState(double velocity) {
             this.velocity = velocity;
         }
     }

@@ -112,7 +112,7 @@ public final class ShooterConstants {
 
     public enum IndexerState {
         ZERO(RotationsPerSecond.of(0)),
-        SCORE(RotationsPerSecond.of(-100));
+        SCORE(RotationsPerSecond.of(-30));
 
         public final AngularVelocity velocity;
 
