@@ -24,14 +24,14 @@ public class Lintake extends SubsystemBase {
     private RollerState m_rollerState = RollerState.ZERO;
 
     public Lintake() {
-        m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.PinionConfig);
-        m_followerPinionMotor.getConfigurator().apply(LintakeConstants.PinionConfig);
+        m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.LeaderPinionConfig);
+        m_followerPinionMotor.getConfigurator().apply(LintakeConstants.FollowerPinionConfig);
         m_rollerMotor.getConfigurator().apply(LintakeConstants.RollerConfig);
 
         m_leaderPinionMotor.setNeutralMode(NeutralModeValue.Brake);
         m_followerPinionMotor.setNeutralMode(NeutralModeValue.Brake);
 
-        m_followerPinionMotor.setControl(new Follower(m_leaderPinionMotor.getDeviceID(), MotorAlignmentValue.Opposed));
+        //m_followerPinionMotor.setControl(new Follower(m_leaderPinionMotor.getDeviceID(), MotorAlignmentValue.Opposed));
     }
 
     public void setState(PinionState pinionState) {
@@ -45,10 +45,12 @@ public class Lintake extends SubsystemBase {
     @Override
     public void periodic() {
         m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-        m_rollerMotor.setControl(m_velocityRequest.withVelocity(m_rollerState.velocity));
+        m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());;
+        m_rollerMotor.set(m_rollerState.velocity.magnitude());
 
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
         SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
+        SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
         SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, m_leaderPinionMotor.getPosition().getValueAsDouble());
         SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
     }

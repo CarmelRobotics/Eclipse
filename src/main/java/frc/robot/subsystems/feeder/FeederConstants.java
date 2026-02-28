@@ -10,7 +10,7 @@ import edu.wpi.first.units.measure.AngularVelocity;
 public final class FeederConstants {
     public static final String kFeederStateKey = "FeederState";
 
-    public static final int kFeederMotorId = 3;
+    public static final int kFeederMotorId = 44;
 
     private static final double kS = 0.1;
     private static final double kV = 0.12;
@@ -25,7 +25,7 @@ public final class FeederConstants {
 
     public enum FeederState {
         ZERO(RotationsPerSecond.zero()),
-        SCORE(RotationsPerSecond.of(100));
+        SCORE(RotationsPerSecond.of(75));
 
         public final AngularVelocity velocity;
 

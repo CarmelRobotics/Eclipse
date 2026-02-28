@@ -48,15 +48,15 @@ public class Shooter extends SubsystemBase {
 
         m_indexerMotor.getConfigurator().apply(ShooterConstants.IndexerConfig);
 
-        m_leaderPivotMotor.getConfigurator().apply(ShooterConstants.PivotConfig);
-        m_followerPivotMotor.getConfigurator().apply(ShooterConstants.PivotConfig);
+        m_leaderPivotMotor.getConfigurator().apply(ShooterConstants.LeaderPivotConfig);
+        m_followerPivotMotor.getConfigurator().apply(ShooterConstants.FollowerPivotConfig);
 
-        m_leftLeaderShooterMotor.getConfigurator().apply(ShooterConstants.ShooterConfig);
-        m_backLeftFollowerShooterMotor.getConfigurator().apply(ShooterConstants.ShooterConfig);
-        m_rightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.ShooterConfig);
-        m_backRightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.ShooterConfig);
+        m_leftLeaderShooterMotor.getConfigurator().apply(ShooterConstants.LeftShooterConfig);
+        m_backLeftFollowerShooterMotor.getConfigurator().apply(ShooterConstants.LeftShooterConfig);
+        m_rightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.RightShooterConfig);
+        m_backRightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.RightShooterConfig);
 
-        m_followerPivotMotor.setControl(new Follower(m_leaderPivotMotor.getDeviceID(), MotorAlignmentValue.Opposed));
+        //m_followerPivotMotor.setControl(new Follower(m_leaderPivotMotor.getDeviceID(), MotorAlignmentValue.Opposed));
 
         m_backLeftFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Aligned));
         m_rightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
@@ -101,6 +101,7 @@ public class Shooter extends SubsystemBase {
 
     @Override
     public void periodic() {
+        /*
         switch (m_shooterState) {
             case ZERO -> m_leftLeaderShooterMotor.stopMotor();
             case SCORE -> shoot();
@@ -109,11 +110,43 @@ public class Shooter extends SubsystemBase {
             case STOW -> m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0));
             case SCORE -> pivot();
         }
+
+        m_indexerMotor.setControl(m_velocityRequest.withVelocity(m_indexerState.velocity));
+        */
+
+
+        switch (m_pivotState) {
+            case STOW -> {
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(0));
+            }
+            case SCORE -> {
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(20));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(20));
+            }
+        }
+
+        switch (m_shooterState) {
+            case ZERO -> {
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+            }
+            case SCORE -> {
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(100));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(100));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(100));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(100));
+            }
+        }
+        
         m_indexerMotor.setControl(m_velocityRequest.withVelocity(m_indexerState.velocity));
 
         SmartDashboard.putString(ShooterConstants.kShooterIndexerStateKey, m_indexerState.toString());
         SmartDashboard.putString(ShooterConstants.kShooterPivotStateKey, m_pivotState.toString());
         SmartDashboard.putNumber(ShooterConstants.kShooterPositionKey, m_leaderPivotMotor.getPosition().getValueAsDouble());
         SmartDashboard.putNumber(ShooterConstants.kShooterVelocityKey, m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
+        SmartDashboard.putNumber("target shooter pos", m_positionRequest.Position);
     }
 }

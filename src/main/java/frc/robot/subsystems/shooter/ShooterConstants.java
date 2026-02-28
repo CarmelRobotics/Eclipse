@@ -3,8 +3,10 @@ package frc.robot.subsystems.shooter;
 import static edu.wpi.first.units.Units.RotationsPerSecond;
 
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import com.ctre.phoenix6.signals.InvertedValue;
 
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
@@ -18,15 +20,15 @@ public final class ShooterConstants {
     public static final String kShooterPositionKey = "ShooterPosition";
     public static final String kShooterVelocityKey = "ShooterVelocity";
 
-    public static final int kIndexerMotorId = 4; // Kraken X44
+    public static final int kIndexerMotorId = 53; // Kraken X44
 
     public static final int kLeaderPivotMotorId = 5;
     public static final int kFollowerPivotMotorId = 6;
 
     public static final int kLeftLeaderShooterMotorId = 7;
     public static final int kBackLeftFollowerShooterMotorId = 8;
-    public static final int kRightFollowerShooterMotorId = 9;
-    public static final int kBackRightFollowerShooterMotorId = 10;
+    public static final int kRightFollowerShooterMotorId = 11;
+    public static final int kBackRightFollowerShooterMotorId = 49;
 
     public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
@@ -39,7 +41,6 @@ public final class ShooterConstants {
         .ofEntries(
             // TODO: put data here
         );
-    
 
     private static final class PivotConfigs {
         private static final double kA = 0.01;
@@ -84,10 +85,18 @@ public final class ShooterConstants {
             .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
     }
 
-    public static final TalonFXConfiguration PivotConfig = new TalonFXConfiguration()
-        .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs);
+    public static final TalonFXConfiguration LeaderPivotConfig = new TalonFXConfiguration()
+        .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs)
+        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
     
-    public static final TalonFXConfiguration ShooterConfig = new TalonFXConfiguration().withSlot0(ShooterConfigs.Slot0Configs);
+    public static final TalonFXConfiguration FollowerPivotConfig = new TalonFXConfiguration()
+        .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs)
+        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
+
+    public static final TalonFXConfiguration LeftShooterConfig = new TalonFXConfiguration()
+        .withSlot0(ShooterConfigs.Slot0Configs).withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
+    public static final TalonFXConfiguration RightShooterConfig = new TalonFXConfiguration()
+        .withSlot0(ShooterConfigs.Slot0Configs).withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
     public static final TalonFXConfiguration IndexerConfig = new TalonFXConfiguration().withSlot0(IndexerConfigs.Slot0Configs);
 
@@ -102,8 +111,8 @@ public final class ShooterConstants {
     }
 
     public enum IndexerState {
-        ZERO(RotationsPerSecond.zero()),
-        SCORE(RotationsPerSecond.of(100));
+        ZERO(RotationsPerSecond.of(0)),
+        SCORE(RotationsPerSecond.of(-100));
 
         public final AngularVelocity velocity;
 
