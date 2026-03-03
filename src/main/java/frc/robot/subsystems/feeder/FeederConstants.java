@@ -24,12 +24,12 @@ public final class FeederConstants {
     public static final TalonFXConfiguration FeederConfig = new TalonFXConfiguration().withSlot0(Slot0Configs);
 
     public enum FeederState {
-        ZERO(RotationsPerSecond.zero()),
-        SCORE(RotationsPerSecond.of(100));
+        ZERO(0),
+        SCORE(12);
 
-        public final AngularVelocity velocity;
+        public final double velocity;
 
-        private FeederState(AngularVelocity velocity) {
+        private FeederState(double velocity) {
             this.velocity = velocity;
         }
     }

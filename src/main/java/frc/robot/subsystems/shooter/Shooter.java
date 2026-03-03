@@ -134,14 +134,14 @@ public class Shooter extends SubsystemBase {
                 m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
             }
             case SCORE -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(100));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(100));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(100));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(100));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(24));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(24));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(24));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(24));
             }
         }
         
-        m_indexerMotor.setControl(m_velocityRequest.withVelocity(m_indexerState.velocity));
+        m_indexerMotor.setVoltage(m_indexerState.velocity.magnitude());
 
         SmartDashboard.putString(ShooterConstants.kShooterIndexerStateKey, m_indexerState.toString());
         SmartDashboard.putString(ShooterConstants.kShooterPivotStateKey, m_pivotState.toString());

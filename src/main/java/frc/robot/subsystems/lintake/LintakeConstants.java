@@ -79,7 +79,7 @@ public final class LintakeConstants {
     public enum RollerState {
         ZERO(0),
         EJECT(12),
-        INTAKE(-4),
+        INTAKE(-5.15),
         SCORE(12);
 
         public final double velocity;

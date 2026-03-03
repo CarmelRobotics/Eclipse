@@ -65,8 +65,8 @@ public final class ShooterConstants {
 
     private static final class ShooterConfigs {
         private static final double kS = 0.1;
-        private static final double kV = 0.12;
-        private static final double kP = 0.11;
+        private static final double kV = 0.22;
+        private static final double kP = 0.5;
         private static final double kI = 0;
         private static final double kD = 0;
 
@@ -112,7 +112,7 @@ public final class ShooterConstants {
 
     public enum IndexerState {
         ZERO(RotationsPerSecond.of(0)),
-        SCORE(RotationsPerSecond.of(-30));
+        SCORE(RotationsPerSecond.of(-10));
 
         public final AngularVelocity velocity;
 
