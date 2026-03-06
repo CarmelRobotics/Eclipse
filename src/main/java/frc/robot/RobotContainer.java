@@ -73,8 +73,8 @@ public class RobotContainer {
     m_controller.leftTrigger().onTrue(Commands.run(() -> m_shooter.setState(PivotState.STOW), m_shooter));
     m_controller.a().onTrue(Commands.run(() -> m_shooter.setState(ShooterState.SCORE), m_shooter));
     m_controller.b().onTrue(Commands.run(() -> m_shooter.setState(ShooterState.ZERO), m_shooter));
-    m_controller.x().onTrue(Commands.run(() -> m_shooter.setState(IndexerState.SCORE), m_shooter));
-    m_controller.y().onTrue(Commands.run(() -> m_shooter.setState(IndexerState.ZERO), m_shooter));
+    m_controller.x().onTrue(Commands.run(() -> m_shooter.setState(IndexerState.SCORE), m_shooter).alongWith(Commands.run(() -> m_feeder.setState(FeederState.SCORE))));
+    m_controller.y().onTrue(Commands.run(() -> m_shooter.setState(IndexerState.ZERO), m_shooter).alongWith(Commands.run(() -> m_feeder.setState(FeederState.ZERO))));
     /*
     m_controller.povUp().onTrue(Commands.run(() -> m_feeder.setState(FeederState.SCORE), m_feeder));
     m_controller.povDown().onTrue(Commands.run(() -> m_feeder.setState(FeederState.ZERO), m_feeder));

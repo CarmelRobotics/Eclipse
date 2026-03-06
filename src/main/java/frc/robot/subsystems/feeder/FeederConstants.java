@@ -25,7 +25,7 @@ public final class FeederConstants {
 
     public enum FeederState {
         ZERO(0),
-        SCORE(12);
+        SCORE(-6);
 
         public final double velocity;
 
