@@ -1,7 +1,5 @@
 package frc.robot.subsystems.feeder;
 
-import org.ejml.ops.MatrixFeatures_F;
-
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 
@@ -29,8 +27,8 @@ public class Feeder extends SubsystemBase {
         } else {
             this.m_feederMotor.set(0);
         }
-        SmartDashboard.putNumber("Feeder voltage", this.m_feederMotor.getMotorVoltage().getValueAsDouble());
-        SmartDashboard.putNumber("Feeder target voltage", m_feederState.velocity*20);
+        SmartDashboard.putNumber(FeederConstants.kFeederVoltageKey, m_feederMotor.getMotorVoltage().getValueAsDouble());
+        SmartDashboard.putNumber(FeederConstants.kFeederTargetVoltageKey, m_feederState.volts*20);
         SmartDashboard.putString(FeederConstants.kFeederStateKey, m_feederState.toString());
     }
 }

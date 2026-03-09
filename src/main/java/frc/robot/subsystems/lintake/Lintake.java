@@ -1,10 +1,8 @@
 package frc.robot.subsystems.lintake;
 
-import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -47,7 +45,7 @@ public class Lintake extends SubsystemBase {
         m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
         m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());;
         m_rollerMotor.setVoltage(m_rollerState.velocity);
-        SmartDashboard.putNumber("roller voltage", this.m_rollerMotor.getMotorVoltage().getValueAsDouble());
+        SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
         SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
         SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);

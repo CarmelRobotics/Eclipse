@@ -13,6 +13,7 @@ public final class LocalisationConstants {
     public static final String kFieldKey = "Field";
 
     public static final LimelightInfo[] kLimelights = {
+        new LimelightInfo("limelight-four", 0.35, 0, 0.15, 0, 20, 0)
     };
 
     private static final double kMass = 0;

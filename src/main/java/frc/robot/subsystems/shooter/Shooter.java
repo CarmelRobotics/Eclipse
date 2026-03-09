@@ -121,23 +121,23 @@ public class Shooter extends SubsystemBase {
                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(0));
             }
             case SCORE -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(20));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(20));
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(1));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(1));
             }
         }
 
         switch (m_shooterState) {
             case ZERO -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(0));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
             }
             case SCORE -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(24));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(24));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(24));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(24));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(8));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(8));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(8));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(8));
             }
         }
         
@@ -147,6 +147,6 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putString(ShooterConstants.kShooterPivotStateKey, m_pivotState.toString());
         SmartDashboard.putNumber(ShooterConstants.kShooterPositionKey, m_leaderPivotMotor.getPosition().getValueAsDouble());
         SmartDashboard.putNumber(ShooterConstants.kShooterVelocityKey, m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
-        SmartDashboard.putNumber("target shooter pos", m_positionRequest.Position);
+        SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
     }
 }

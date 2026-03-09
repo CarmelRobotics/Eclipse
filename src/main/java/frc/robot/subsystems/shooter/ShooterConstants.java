@@ -19,6 +19,7 @@ public final class ShooterConstants {
     public static final String kShooterIndexerStateKey = "ShooterIndexerState";
     public static final String kShooterPositionKey = "ShooterPosition";
     public static final String kShooterVelocityKey = "ShooterVelocity";
+    public static final String kShooterTargetPositionKey = "ShooterTargetPosition";
 
     public static final int kIndexerMotorId = 53; // Kraken X44
 
@@ -64,9 +65,9 @@ public final class ShooterConstants {
     }
 
     private static final class ShooterConfigs {
-        private static final double kS = 0.1;
-        private static final double kV = 0.22;
-        private static final double kP = 0.5;
+        private static final double kS = 0;
+        private static final double kV = 0.5;
+        private static final double kP = 0;
         private static final double kI = 0;
         private static final double kD = 0;
 

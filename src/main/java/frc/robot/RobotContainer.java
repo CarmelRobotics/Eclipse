@@ -4,10 +4,6 @@
 
 package frc.robot;
 
-import static edu.wpi.first.units.Units.MetersPerSecond;
-import static edu.wpi.first.units.Units.RadiansPerSecond;
-import static edu.wpi.first.units.Units.RotationsPerSecond;
-
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 
@@ -23,22 +19,15 @@ import frc.robot.subsystems.feeder.FeederConstants.FeederState;
 import frc.robot.subsystems.lintake.Lintake;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
+import frc.robot.subsystems.localisation.Localisation;
 import frc.robot.subsystems.shooter.Shooter;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 
 public class RobotContainer {
-  private static final double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
-  private static final double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
-
-  /* Setting up bindings for necessary control of the swerve drive platform */
-  private final SwerveRequest.FieldCentric m_drive = new SwerveRequest.FieldCentric()
-            .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
-            .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
-
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
-
+  private final Localisation m_localisation = new Localisation(m_drivetrain);
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(() -> new Pose2d());
   private final Feeder m_feeder = new Feeder();
@@ -49,38 +38,50 @@ public class RobotContainer {
   }
 
   private void configureBindings() {
+    final SwerveRequest.FieldCentric driveRequest = new SwerveRequest.FieldCentric()
+            .withDeadband(Constants.kMaxSpeed * 0.1).withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+    
+    final SwerveRequest idle = new SwerveRequest.Idle();
+
     m_drivetrain.setDefaultCommand(
-            // Drivetrain will execute this command periodically
             m_drivetrain.applyRequest(() ->
-                m_drive.withVelocityX(-m_controller.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                    .withVelocityY(-m_controller.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                    .withRotationalRate(-m_controller.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
+                driveRequest.withVelocityX(-m_controller.getLeftY() * Constants.kMaxSpeed)
+                    .withVelocityY(-m_controller.getLeftX() * Constants.kMaxSpeed)
+                    .withRotationalRate(-m_controller.getRightX() * Constants.kMaxAngularRate)
             )
         );
 
-
-    final SwerveRequest idle = new SwerveRequest.Idle();
     RobotModeTriggers.disabled().whileTrue(
             m_drivetrain.applyRequest(() -> idle).ignoringDisable(true)
         );
-        
     
-    m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
-
-    m_controller.leftBumper().onTrue(Commands.run(() -> m_lintake.setState(PinionState.GROUND), m_lintake));
-    m_controller.rightBumper().onTrue(Commands.run(() -> m_lintake.setState(PinionState.STOW), m_lintake));
-    m_controller.rightTrigger().onTrue(Commands.run(() -> m_shooter.setState(PivotState.SCORE), m_shooter));
-    m_controller.leftTrigger().onTrue(Commands.run(() -> m_shooter.setState(PivotState.STOW), m_shooter));
-    m_controller.a().onTrue(Commands.run(() -> m_shooter.setState(ShooterState.SCORE), m_shooter));
-    m_controller.b().onTrue(Commands.run(() -> m_shooter.setState(ShooterState.ZERO), m_shooter));
-    m_controller.x().onTrue(Commands.run(() -> m_shooter.setState(IndexerState.SCORE), m_shooter).alongWith(Commands.run(() -> m_feeder.setState(FeederState.SCORE))));
-    m_controller.y().onTrue(Commands.run(() -> m_shooter.setState(IndexerState.ZERO), m_shooter).alongWith(Commands.run(() -> m_feeder.setState(FeederState.ZERO))));
     /*
-    m_controller.povUp().onTrue(Commands.run(() -> m_feeder.setState(FeederState.SCORE), m_feeder));
-    m_controller.povDown().onTrue(Commands.run(() -> m_feeder.setState(FeederState.ZERO), m_feeder));
-    */
-    m_controller.povLeft().onTrue(Commands.run(() -> m_lintake.setState(RollerState.INTAKE), m_lintake));
-    m_controller.povRight().onTrue(Commands.run(() -> m_lintake.setState(RollerState.ZERO), m_lintake));
+     * Pov Down: Reset robot rotation to zero
+     * Left Trigger: Set lintake to ground and then set roller to intake, afterwards set the roller to zero
+     * Left Bumper: Set lintake to ground
+     * Right Trigger: Set pivot to score, feeder to score, indexer to score, shooter to score, and then reset all to zero.
+     * Right Bumper: Set lintake to stow.
+     */
+    m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
+    m_controller.leftTrigger().whileTrue(Commands.runEnd(() -> {
+      m_lintake.setState(PinionState.GROUND);
+      m_lintake.setState(RollerState.INTAKE);
+    }, () -> {
+      m_lintake.setState(RollerState.ZERO);
+    }, m_lintake));
+    m_controller.rightTrigger().whileTrue(Commands.runEnd(() -> {
+      m_shooter.setState(PivotState.SCORE);
+      m_feeder.setState(FeederState.SCORE);
+      m_shooter.setState(IndexerState.SCORE);
+      m_shooter.setState(ShooterState.SCORE);
+    }, () -> {
+      m_feeder.setState(FeederState.ZERO);
+      m_shooter.setState(IndexerState.ZERO);
+      m_shooter.setState(ShooterState.ZERO);
+      m_shooter.setState(PivotState.STOW);
+    }, m_shooter, m_feeder));
+    m_controller.rightBumper().onTrue(Commands.run(() -> m_lintake.setState(PinionState.STOW), m_lintake));
   }
 
   public Command getAutonomousCommand() {

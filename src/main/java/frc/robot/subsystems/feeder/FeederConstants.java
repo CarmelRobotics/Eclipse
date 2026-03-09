@@ -1,14 +1,14 @@
 package frc.robot.subsystems.feeder;
 
-import static edu.wpi.first.units.Units.RotationsPerSecond;
-
+import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-
-import edu.wpi.first.units.measure.AngularVelocity;
+import com.ctre.phoenix6.signals.InvertedValue;
 
 public final class FeederConstants {
     public static final String kFeederStateKey = "FeederState";
+    public static final String kFeederVoltageKey = "FeederVoltage";
+    public static final String kFeederTargetVoltageKey = "FeederTargetVoltage";
 
     public static final int kFeederMotorId = 44;
 
@@ -21,16 +21,18 @@ public final class FeederConstants {
     private static final Slot0Configs Slot0Configs = new Slot0Configs()
         .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
 
-    public static final TalonFXConfiguration FeederConfig = new TalonFXConfiguration().withSlot0(Slot0Configs);
+    public static final TalonFXConfiguration FeederConfig = 
+        new TalonFXConfiguration().withSlot0(Slot0Configs)
+            .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
 
     public enum FeederState {
         ZERO(0),
         SCORE(-6);
 
-        public final double velocity;
+        public final double volts;
 
-        private FeederState(double velocity) {
-            this.velocity = velocity;
+        private FeederState(double volts) {
+            this.volts = volts;
         }
     }
 }

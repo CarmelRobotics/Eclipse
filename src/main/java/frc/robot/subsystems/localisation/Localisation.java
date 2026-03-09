@@ -54,6 +54,8 @@ public class Localisation extends SubsystemBase {
             m_drivetrain
         );
 
+        setPerspective(DriverStation.getAlliance().orElse(Alliance.Blue));
+
         SmartDashboard.putData(LocalisationConstants.kFieldKey, m_field);
         CommandScheduler.getInstance().schedule(PathfindingCommand.warmupCommand());
     }
@@ -67,34 +69,39 @@ public class Localisation extends SubsystemBase {
     }
 
     public void setPerspective(Alliance alliance) {
-        m_drivetrain.setOperatorPerspectiveForward(alliance == Alliance.Red ? Rotation2d.k180deg : Rotation2d.kZero);
+        final Rotation2d perspective = alliance == Alliance.Red ? Rotation2d.k180deg : Rotation2d.kZero;
+        m_drivetrain.setOperatorPerspectiveForward(perspective);
         limelightGetBotPoseEstimate = alliance == Alliance.Red
-            ? LimelightHelpers::getBotPoseEstimate_wpiRed_MegaTag2
-            : LimelightHelpers::getBotPoseEstimate_wpiBlue_MegaTag2;
+            ? LimelightHelpers::getBotPoseEstimate_wpiBlue
+            : LimelightHelpers::getBotPoseEstimate_wpiRed;
+        resetPose(new Pose2d(0, 0, perspective));
     }
 
     public void periodic() {
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
-            if (LimelightHelpers.getTV(limelight.name())) {
-                LimelightHelpers.SetRobotOrientation(
+            LimelightHelpers.SetRobotOrientation(
                     limelight.name(), getPose().getRotation().getDegrees(), 
                     m_drivetrain.getPigeon2().getAngularVelocityZWorld().getValueAsDouble(), 
                     0, 0, 0, 0
                 );
 
-                final LimelightHelpers.PoseEstimate estimate = limelightGetBotPoseEstimate.apply(limelight.name());
+            final LimelightHelpers.PoseEstimate estimate = limelightGetBotPoseEstimate.apply(limelight.name());
 
+            if (estimate == null) {
+                continue;
+            }
+
+            if (estimate.tagCount > 0) {
                 final double xyStdDev;
                 if (estimate.tagCount >= 2) {
                     xyStdDev = 0.1;
-                } else if (estimate.avgTagDist > 0.075 && estimate.avgTagArea < 2.5) {
+                } else if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
                     xyStdDev = 0.2;
                 } else {
                     xyStdDev = Math.pow(0.5, estimate.avgTagDist + 1);
                 }
 
                 m_drivetrain.addVisionMeasurement(estimate.pose, estimate.timestampSeconds, VecBuilder.fill(xyStdDev, xyStdDev, Double.MAX_VALUE));
-
             }
         }
 

@@ -15,6 +15,7 @@ public final class LintakeConstants {
 
     public static final String kPinionStateKey = "PinionState";
     public static final String kRollerStateKey = "RollerState";
+    public static final String kRollerVoltageKey = "RollerVoltage";
     public static final String kLeaderPinionPositionKey = "LeaderPinionPosition";
     public static final String kFollowerPinionPositionKey = "FollowerPinionPosition";
     public static final String kPinionPositionTargetKey = "PinionPositionTarget";
@@ -79,7 +80,7 @@ public final class LintakeConstants {
     public enum RollerState {
         ZERO(0),
         EJECT(12),
-        INTAKE(-5.15),
+        INTAKE(-7.15),
         SCORE(12);
 
         public final double velocity;
