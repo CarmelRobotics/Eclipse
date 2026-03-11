@@ -6,8 +6,14 @@ package frc.robot;
 
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
+import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.commands.PathPlannerAuto;
+import com.pathplanner.lib.path.PathConstraints;
+import com.pathplanner.lib.path.PathPlannerPath;
+import com.pathplanner.lib.trajectory.PathPlannerTrajectory;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
@@ -26,6 +32,7 @@ import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 
 public class RobotContainer {
+  private PathPlannerAuto traj;
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
   private final Localisation m_localisation = new Localisation(m_drivetrain);
   private final Lintake m_lintake = new Lintake();
@@ -34,6 +41,7 @@ public class RobotContainer {
   private final CommandXboxController m_controller = new CommandXboxController(0);
 
   public RobotContainer() {
+    traj = new PathPlannerAuto("testauto");
     configureBindings();
   }
 
@@ -63,28 +71,36 @@ public class RobotContainer {
      * Right Trigger: Set pivot to score, feeder to score, indexer to score, shooter to score, and then reset all to zero.
      * Right Bumper: Set lintake to stow.
      */
+    
     m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
     m_controller.leftTrigger().whileTrue(Commands.runEnd(() -> {
-      m_lintake.setState(PinionState.GROUND);
       m_lintake.setState(RollerState.INTAKE);
     }, () -> {
       m_lintake.setState(RollerState.ZERO);
     }, m_lintake));
-    m_controller.rightTrigger().whileTrue(Commands.runEnd(() -> {
-      m_shooter.setState(PivotState.SCORE);
-      m_feeder.setState(FeederState.SCORE);
-      m_shooter.setState(IndexerState.SCORE);
-      m_shooter.setState(ShooterState.SCORE);
-    }, () -> {
-      m_feeder.setState(FeederState.ZERO);
-      m_shooter.setState(IndexerState.ZERO);
-      m_shooter.setState(ShooterState.ZERO);
-      m_shooter.setState(PivotState.STOW);
-    }, m_shooter, m_feeder));
-    m_controller.rightBumper().onTrue(Commands.run(() -> m_lintake.setState(PinionState.STOW), m_lintake));
+   m_controller.rightTrigger().whileTrue(
+    Commands.sequence(
+        Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.SCORE);
+            m_shooter.setState(ShooterState.SCORE);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
+        Commands.run(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+    ).finallyDo(() -> {
+        m_shooter.setState(IndexerState.ZERO);
+        m_shooter.setState(ShooterState.ZERO);
+        m_shooter.setState(PivotState.STOW);
+    })
+);
+    m_controller.rightBumper().onTrue(m_lintake.retract());
+    m_controller.leftBumper().onTrue(m_lintake.extend());
   }
 
   public Command getAutonomousCommand() {
-    return Commands.print("No autonomous command configured");
+    return m_drivetrain.setPose(new Pose2d(3.536,7.365,Rotation2d.fromDegrees(0))).andThen(Commands.runOnce(()->m_lintake.setState(PinionState.GROUND)).andThen(AutoBuilder.pathfindToPose(new Pose2d(5.806,7.365, Rotation2d.fromDegrees(0)), new PathConstraints(1,1,540,540))));
   }
 }

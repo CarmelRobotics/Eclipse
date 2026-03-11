@@ -6,6 +6,8 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
@@ -22,8 +24,8 @@ public class Lintake extends SubsystemBase {
     private RollerState m_rollerState = RollerState.ZERO;
 
     public Lintake() {
-        m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.LeaderPinionConfig);
-        m_followerPinionMotor.getConfigurator().apply(LintakeConstants.FollowerPinionConfig);
+       // m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.LeaderPinionConfig);
+        //m_followerPinionMotor.getConfigurator().apply(LintakeConstants.FollowerPinionConfig);
         m_rollerMotor.getConfigurator().apply(LintakeConstants.RollerConfig);
 
         m_leaderPinionMotor.setNeutralMode(NeutralModeValue.Brake);
@@ -40,10 +42,29 @@ public class Lintake extends SubsystemBase {
         m_rollerState = rollerState;
     }
 
+    public Command extend(){
+        return Commands.runOnce(()-> {
+        m_leaderPinionMotor.setVoltage(3.25);
+        m_followerPinionMotor.setVoltage(3.25); }
+        ).andThen(Commands.waitSeconds(.3)).andThen(Commands.runOnce(()->{
+            m_leaderPinionMotor.setVoltage(0); 
+            m_followerPinionMotor.setVoltage(0);} 
+            ));
+    }
+      public Command retract(){
+        return Commands.runOnce(()-> {
+        m_leaderPinionMotor.setVoltage(-3.25);
+        m_followerPinionMotor.setVoltage(-3.25); }
+        ).andThen(Commands.waitSeconds(.2)).andThen(Commands.runOnce(()->{
+            m_leaderPinionMotor.setVoltage(0); 
+            m_followerPinionMotor.setVoltage(0);} 
+            ));
+    }
+
     @Override
     public void periodic() {
-        m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-        m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());;
+       // m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
+       //m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());;
         m_rollerMotor.setVoltage(m_rollerState.velocity);
         SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
@@ -51,5 +72,7 @@ public class Lintake extends SubsystemBase {
         SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
         SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, m_leaderPinionMotor.getPosition().getValueAsDouble());
         SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
+
     }
+    
 }

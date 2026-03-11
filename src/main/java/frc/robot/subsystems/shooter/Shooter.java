@@ -121,23 +121,23 @@ public class Shooter extends SubsystemBase {
                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(0));
             }
             case SCORE -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(1));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(1));
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(.1));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(.1));
             }
         }
 
         switch (m_shooterState) {
             case ZERO -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(1.5));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
             }
             case SCORE -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(8));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(8));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(8));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(8));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(6));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(6));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(6));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(6));
             }
         }
         

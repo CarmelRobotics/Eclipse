@@ -9,6 +9,7 @@ import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.signals.InvertedValue;
 
 import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.wpilibj2.command.Commands;
 
 public final class LintakeConstants {
     // TODO: Configure constants
@@ -28,10 +29,10 @@ public final class LintakeConstants {
     private static final class PinionConfigs {
         private static final double kA = 0;
         private static final double kD = 0;
-        private static final double kI = 0;
-        private static final double kP = 0;
-        private static final double kS = 0;
-        private static final double kV = 0.25;
+        private static final double kI = 0.2;
+        private static final double kP = 6.7;
+        private static final double kS = 0.025;
+        private static final double kV = 0.15;
 
         private static final double kMotionMagicCruiseVelocity = 80;
         private static final double kMotionMagicAcceleration = 160;
@@ -80,7 +81,7 @@ public final class LintakeConstants {
     public enum RollerState {
         ZERO(0),
         EJECT(12),
-        INTAKE(-7.15),
+        INTAKE(-8.15),
         SCORE(12);
 
         public final double velocity;
@@ -89,4 +90,5 @@ public final class LintakeConstants {
             this.velocity = velocity;
         }
     }
+    
 }
