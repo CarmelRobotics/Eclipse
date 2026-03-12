@@ -34,16 +34,10 @@ public final class ShooterConstants {
     public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
 
-    public static final InterpolatingDoubleTreeMap PivotPositionMap = InterpolatingDoubleTreeMap
-        .ofEntries(
-            // TODO: put data here
-        );
-    public static final InterpolatingDoubleTreeMap ShooterVelocityRPSMap = InterpolatingDoubleTreeMap
-        .ofEntries(
-            // TODO: put data here
-        );
+   
 
     private static final class PivotConfigs {
+        
         private static final double kA = 0.01;
         private static final double kD = 0.1;
         private static final double kI = 0;
@@ -103,12 +97,14 @@ public final class ShooterConstants {
 
     public enum PivotState {
         STOW,
-        SCORE;
+        SCORE,
+        LOB;
     }
 
     public enum ShooterState {
         ZERO,
-        SCORE;
+        SCORE,
+        LOB;
     }
 
     public enum IndexerState {

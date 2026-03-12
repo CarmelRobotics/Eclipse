@@ -36,7 +36,7 @@ public class RobotContainer {
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
   private final Localisation m_localisation = new Localisation(m_drivetrain);
   private final Lintake m_lintake = new Lintake();
-  private final Shooter m_shooter = new Shooter(() -> new Pose2d());
+  private final Shooter m_shooter = new Shooter(() -> new Pose2d(),m_drivetrain);
   private final Feeder m_feeder = new Feeder();
   private final CommandXboxController m_controller = new CommandXboxController(0);
 
@@ -83,6 +83,24 @@ public class RobotContainer {
         Commands.runOnce(() -> {
             m_shooter.setState(PivotState.SCORE);
             m_shooter.setState(ShooterState.SCORE);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
+        Commands.run(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+    ).finallyDo(() -> {
+        m_shooter.setState(IndexerState.ZERO);
+        m_shooter.setState(ShooterState.ZERO);
+        m_shooter.setState(PivotState.STOW);
+    })
+);
+m_controller.povUp().whileTrue(
+    Commands.sequence(
+        Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.LOB);
+            m_shooter.setState(ShooterState.LOB);
         }, m_shooter),
 
         Commands.waitSeconds(0.5),

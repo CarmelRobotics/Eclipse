@@ -12,17 +12,23 @@ import com.ctre.phoenix6.signals.MotorAlignmentValue;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
 import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 
 public class Shooter extends SubsystemBase {
     private final TalonFX m_indexerMotor = new TalonFX(ShooterConstants.kIndexerMotorId);
+
+    public static InterpolatingDoubleTreeMap PivotPositionMap =  new InterpolatingDoubleTreeMap();
+    
+    public static InterpolatingDoubleTreeMap ShooterVelocityRPSMap = new InterpolatingDoubleTreeMap();
 
     private final TalonFX m_leaderPivotMotor = new TalonFX(ShooterConstants.kLeaderPivotMotorId);
     private final TalonFX m_followerPivotMotor = new TalonFX(ShooterConstants.kFollowerPivotMotorId);
@@ -42,9 +48,13 @@ public class Shooter extends SubsystemBase {
     private ShooterState m_shooterState = ShooterState.ZERO;
     private IndexerState m_indexerState = IndexerState.ZERO;
 
-    public Shooter(Supplier<Pose2d> poseSupplier) {
+    private CommandSwerveDrivetrain m_drive;
+
+    public Shooter(Supplier<Pose2d> poseSupplier, CommandSwerveDrivetrain drive) {
         m_poseSupplier = poseSupplier;
         setHubPosition(DriverStation.getAlliance().orElse(Alliance.Blue));
+
+        m_drive = drive;
 
         m_indexerMotor.getConfigurator().apply(ShooterConstants.IndexerConfig);
 
@@ -61,6 +71,16 @@ public class Shooter extends SubsystemBase {
         m_backLeftFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Aligned));
         m_rightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
         m_backRightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
+
+
+        PivotPositionMap.put(2.92, .7);
+        PivotPositionMap.put(2.12,.1);
+        PivotPositionMap.put(4.0, 1.25);
+        ShooterVelocityRPSMap.put(2.92,6.8);
+        ShooterVelocityRPSMap.put(2.12,6.0);
+        ShooterVelocityRPSMap.put(4.0, 7.25);
+        
+
     }
 
     public void setState(IndexerState indexerState, PivotState pivotState, ShooterState shooterState) {
@@ -89,13 +109,13 @@ public class Shooter extends SubsystemBase {
 
     private void shoot() {
         final double distance = m_poseSupplier.get().getTranslation().getDistance(m_hubPosition);
-        final AngularVelocity velocity = RotationsPerSecond.of(ShooterConstants.ShooterVelocityRPSMap.get(distance));
+        final AngularVelocity velocity = RotationsPerSecond.of(ShooterVelocityRPSMap.get(distance));
         m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(velocity));
     }
 
     private void pivot() {
         final double distance = m_poseSupplier.get().getTranslation().getDistance(m_hubPosition);
-        final double position = ShooterConstants.PivotPositionMap.get(distance);
+        final double position = PivotPositionMap.get(distance);
         m_leaderPivotMotor.setControl(m_positionRequest.withPosition(position));
     }
 
@@ -114,6 +134,8 @@ public class Shooter extends SubsystemBase {
         m_indexerMotor.setControl(m_velocityRequest.withVelocity(m_indexerState.velocity));
         */
 
+        SmartDashboard.putNumber("interpolated velocity", ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub()));
+
 
         switch (m_pivotState) {
             case STOW -> {
@@ -121,8 +143,12 @@ public class Shooter extends SubsystemBase {
                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(0));
             }
             case SCORE -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(.1));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(.1));
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
+            }
+            case LOB -> {
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(1.5));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(1.5));
             }
         }
 
@@ -134,11 +160,18 @@ public class Shooter extends SubsystemBase {
                 m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
             }
             case SCORE -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(6));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(6));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(6));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(6));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
             }
+             case LOB -> {
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(30));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(30));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(20));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(30));
+            }
+            
         }
         
         m_indexerMotor.setVoltage(m_indexerState.velocity.magnitude());
