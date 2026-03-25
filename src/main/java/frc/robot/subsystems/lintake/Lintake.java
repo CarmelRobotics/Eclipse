@@ -24,27 +24,34 @@ public class Lintake extends SubsystemBase {
     private RollerState m_rollerState = RollerState.ZERO;
 
     public Lintake() {
-       // m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.LeaderPinionConfig);
-        //m_followerPinionMotor.getConfigurator().apply(LintakeConstants.FollowerPinionConfig);
+        m_followerPinionMotor.setPosition(0);
+        m_leaderPinionMotor.setPosition(0);
+
+        m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.LeaderPinionConfig);
+        m_followerPinionMotor.getConfigurator().apply(LintakeConstants.FollowerPinionConfig);
         m_rollerMotor.getConfigurator().apply(LintakeConstants.RollerConfig);
 
         m_leaderPinionMotor.setNeutralMode(NeutralModeValue.Brake);
         m_followerPinionMotor.setNeutralMode(NeutralModeValue.Brake);
 
+        m_rollerMotor.setNeutralMode(NeutralModeValue.Brake);
         //m_followerPinionMotor.setControl(new Follower(m_leaderPinionMotor.getDeviceID(), MotorAlignmentValue.Opposed));
     }
 
-    public void setState(PinionState pinionState) {
-        m_pinionState = pinionState;
+    public Command setState(PinionState pinionState) {
+        return runOnce(()->{
+            this.m_pinionState = pinionState;
+        });
     }
 
     public void setState(RollerState rollerState) {
         m_rollerState = rollerState;
     }
 
+    /*
     public Command extend(){
         return Commands.runOnce(()-> {
-        m_leaderPinionMotor.setVoltage(3.25);
+        m_leaderPinionMotor.setVoltage(7.25);
         m_followerPinionMotor.setVoltage(3.25); }
         ).andThen(Commands.waitSeconds(.3)).andThen(Commands.runOnce(()->{
             m_leaderPinionMotor.setVoltage(0); 
@@ -60,11 +67,12 @@ public class Lintake extends SubsystemBase {
             m_followerPinionMotor.setVoltage(0);} 
             ));
     }
+    */
 
     @Override
     public void periodic() {
-       // m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-       //m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());;
+        m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
+        m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());
         m_rollerMotor.setVoltage(m_rollerState.velocity);
         SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());

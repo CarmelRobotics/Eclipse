@@ -27,7 +27,7 @@ public class Feeder extends SubsystemBase {
         } else {
             this.m_feederMotor.set(0);
         }
-        SmartDashboard.putNumber(FeederConstants.kFeederVoltageKey, m_feederMotor.getMotorVoltage().getValueAsDouble());
+       // SmartDashboard.putNumber(FeederConstants.kFeederVoltageKey, m_feederMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putNumber(FeederConstants.kFeederTargetVoltageKey, m_feederState.volts*20);
         SmartDashboard.putString(FeederConstants.kFeederStateKey, m_feederState.toString());
     }

@@ -17,6 +17,8 @@ import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
@@ -61,10 +63,15 @@ public class Shooter extends SubsystemBase {
         m_leaderPivotMotor.getConfigurator().apply(ShooterConstants.LeaderPivotConfig);
         m_followerPivotMotor.getConfigurator().apply(ShooterConstants.FollowerPivotConfig);
 
+        m_leaderPivotMotor.setPosition(0);
+        m_followerPivotMotor.setPosition(0);
+
         m_leftLeaderShooterMotor.getConfigurator().apply(ShooterConstants.LeftShooterConfig);
         m_backLeftFollowerShooterMotor.getConfigurator().apply(ShooterConstants.LeftShooterConfig);
         m_rightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.RightShooterConfig);
         m_backRightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.RightShooterConfig);
+
+        
 
         //m_followerPivotMotor.setControl(new Follower(m_leaderPivotMotor.getDeviceID(), MotorAlignmentValue.Opposed));
 
@@ -72,6 +79,13 @@ public class Shooter extends SubsystemBase {
         m_rightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
         m_backRightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
 
+        m_indexerMotor.optimizeBusUtilization();
+        m_leaderPivotMotor.optimizeBusUtilization();
+        m_followerPivotMotor.optimizeBusUtilization();
+        m_leftLeaderShooterMotor.optimizeBusUtilization();
+        m_backLeftFollowerShooterMotor.optimizeBusUtilization();
+        m_rightFollowerShooterMotor.optimizeBusUtilization();
+        m_backRightFollowerShooterMotor.optimizeBusUtilization();
 
         PivotPositionMap.put(2.92, .7);
         PivotPositionMap.put(2.12,.1);
@@ -107,6 +121,13 @@ public class Shooter extends SubsystemBase {
             : ShooterConstants.kBlueHubPosition;
     }
 
+    public Command zero(){
+        return Commands.runOnce(()->{
+            this.m_followerPivotMotor.setPosition(0);
+            this.m_leaderPivotMotor.setPosition(0);
+        });
+    }
+
     private void shoot() {
         final double distance = m_poseSupplier.get().getTranslation().getDistance(m_hubPosition);
         final AngularVelocity velocity = RotationsPerSecond.of(ShooterVelocityRPSMap.get(distance));
@@ -139,8 +160,8 @@ public class Shooter extends SubsystemBase {
 
         switch (m_pivotState) {
             case STOW -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(0));
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0.1));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(0.1));
             }
             case SCORE -> {
                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
@@ -154,10 +175,10 @@ public class Shooter extends SubsystemBase {
 
         switch (m_shooterState) {
             case ZERO -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(.7));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
             }
             case SCORE -> {
                 m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
@@ -178,8 +199,8 @@ public class Shooter extends SubsystemBase {
 
         SmartDashboard.putString(ShooterConstants.kShooterIndexerStateKey, m_indexerState.toString());
         SmartDashboard.putString(ShooterConstants.kShooterPivotStateKey, m_pivotState.toString());
-        SmartDashboard.putNumber(ShooterConstants.kShooterPositionKey, m_leaderPivotMotor.getPosition().getValueAsDouble());
-        SmartDashboard.putNumber(ShooterConstants.kShooterVelocityKey, m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
+       // SmartDashboard.putNumber(ShooterConstants.kShooterPositionKey, m_leaderPivotMotor.getPosition().getValueAsDouble());
+       // SmartDashboard.putNumber(ShooterConstants.kShooterVelocityKey, m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
         SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
     }
 }

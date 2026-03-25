@@ -7,6 +7,7 @@ package frc.robot;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.path.PathConstraints;
 import com.pathplanner.lib.path.PathPlannerPath;
@@ -38,17 +39,41 @@ public class RobotContainer {
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(() -> new Pose2d(),m_drivetrain);
   private final Feeder m_feeder = new Feeder();
+
   private final CommandXboxController m_controller = new CommandXboxController(0);
+
+    final SwerveRequest.FieldCentric driveRequest = new SwerveRequest.FieldCentric()
+            .withDeadband(Constants.kMaxSpeed * 0.1).withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
   public RobotContainer() {
     traj = new PathPlannerAuto("testauto");
+
+    //PathPlannerPath doubleswipeone = PathPlannerPath.fromPathFile("doubleswipe1");
+    //NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
+    //NamedCommands.registerCommand("intake retract", m_lintake.setState(PinionState.STOW));
+    NamedCommands.registerCommand("intake run", Commands.runOnce(()->m_lintake.setState(RollerState.INTAKE)));
+    NamedCommands.registerCommand("shoot",  Commands.sequence(Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.SCORE);
+            m_shooter.setState(ShooterState.SCORE);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
+        Commands.run(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+    ).finallyDo(() -> {
+        m_shooter.setState(IndexerState.ZERO);
+        m_shooter.setState(ShooterState.ZERO);
+        m_shooter.setState(PivotState.STOW);
+    }));
+    
     configureBindings();
   }
 
   private void configureBindings() {
-    final SwerveRequest.FieldCentric driveRequest = new SwerveRequest.FieldCentric()
-            .withDeadband(Constants.kMaxSpeed * 0.1).withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
-            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+    
     
     final SwerveRequest idle = new SwerveRequest.Idle();
 
@@ -73,6 +98,7 @@ public class RobotContainer {
      */
     
     m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
+    //m_controller.povLeft().onTrue(m_shooter.zero());
     m_controller.leftTrigger().whileTrue(Commands.runEnd(() -> {
       m_lintake.setState(RollerState.INTAKE);
     }, () -> {
@@ -80,6 +106,7 @@ public class RobotContainer {
     }, m_lintake));
    m_controller.rightTrigger().whileTrue(
     Commands.sequence(
+       
         Commands.runOnce(() -> {
             m_shooter.setState(PivotState.SCORE);
             m_shooter.setState(ShooterState.SCORE);
@@ -114,11 +141,31 @@ m_controller.povUp().whileTrue(
         m_shooter.setState(PivotState.STOW);
     })
 );
-    m_controller.rightBumper().onTrue(m_lintake.retract());
-    m_controller.leftBumper().onTrue(m_lintake.extend());
+    m_controller.leftBumper().onTrue(m_lintake.setState(PinionState.GROUND));
+    m_controller.rightBumper().onTrue(m_lintake.setState(PinionState.STOW));
   }
 
   public Command getAutonomousCommand() {
-    return m_drivetrain.setPose(new Pose2d(3.536,7.365,Rotation2d.fromDegrees(0))).andThen(Commands.runOnce(()->m_lintake.setState(PinionState.GROUND)).andThen(AutoBuilder.pathfindToPose(new Pose2d(5.806,7.365, Rotation2d.fromDegrees(0)), new PathConstraints(1,1,540,540))));
+    return Commands.sequence(
+       
+        Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.SCORE);
+            m_shooter.setState(ShooterState.SCORE);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
+        Commands.run(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+    ).andThen(Commands.waitSeconds(4)).andThen(
+        () -> {
+        m_shooter.setState(IndexerState.ZERO);
+        m_shooter.setState(ShooterState.ZERO);
+        m_shooter.setState(PivotState.STOW);
+    });
+    //return AutoBuilder.buildAuto("doubleswipe");
+    //return m_drivetrain.applyRequest(()->driveRequest.withVelocityX(0).withVelocityY(-5)).andThen(Commands.runOnce(()->System.out.println("passed ")));
+    //return m_drivetrain.setPose(new Pose2d(3.536,7.365,Rotation2d.fromDegrees(0))).andThen(Commands.runOnce(()->m_lintake.setState(PinionState.GROUND)).andThen(AutoBuilder.pathfindToPose(new Pose2d(5.806,7.365, Rotation2d.fromDegrees(0)), new PathConstraints(1,1,540,540))));
   }
 }

@@ -300,6 +300,42 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     return MathUtil.clamp(closest, 0, 6);
 }
 
+    private final SwerveRequest.FieldCentricFacingAngle snapRequest =
+        new SwerveRequest.FieldCentricFacingAngle();
+
+public Command snapToHub(Supplier<Double> xSpeed, Supplier<Double> ySpeed) {
+    return applyRequest(() -> {
+
+        Pose2d robotPose = this.getState().Pose;
+        Translation2d robot = robotPose.getTranslation();
+
+        Translation2d[] hubs = {
+            new Translation2d(4.623, 4.0),
+            new Translation2d(11.907, 4.0),
+        };
+
+        Translation2d closestHub = hubs[0];
+        double closest = Double.MAX_VALUE;
+
+        for (Translation2d hub : hubs) {
+            double dist = robot.getDistance(hub);
+            if (dist < closest) {
+                closest = dist;
+                closestHub = hub;
+            }
+        }
+
+        Translation2d diff = closestHub.minus(robot);
+
+        Rotation2d targetAngle = new Rotation2d(diff.getX(), diff.getY());
+
+        return snapRequest
+            .withVelocityX(xSpeed.get())
+            .withVelocityY(ySpeed.get())
+            .withTargetDirection(targetAngle);
+    });
+}
+
     /**
      * Adds a vision measurement to the Kalman Filter. This will correct the odometry pose estimate
      * while still accounting for measurement noise.
