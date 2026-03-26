@@ -27,10 +27,10 @@ public final class LintakeConstants {
     public static final int kRollerMotorId = 45;
 
     private static final class PinionConfigs {
-        private static final double kA = 0;
-        private static final double kD = 0;
-        private static final double kI = 0.2;
-        private static final double kP = 9;
+        private static final double kA = 0.05;
+        private static final double kD = 0.075;
+        private static final double kI = 0;
+        private static final double kP = 15;
         private static final double kS = 0.025;
         private static final double kV = 0.15;
 
@@ -68,8 +68,8 @@ public final class LintakeConstants {
     public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
 
     public enum PinionState {
-        STOW(10),
-        GROUND(0.1);
+        STOW(9.25),
+        GROUND(0);
 
         public final double position;
 

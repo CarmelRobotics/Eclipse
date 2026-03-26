@@ -87,12 +87,12 @@ public class Shooter extends SubsystemBase {
         m_rightFollowerShooterMotor.optimizeBusUtilization();
         m_backRightFollowerShooterMotor.optimizeBusUtilization();
 
-        PivotPositionMap.put(2.92, .7);
-        PivotPositionMap.put(2.12,.1);
-        PivotPositionMap.put(4.0, 1.25);
-        ShooterVelocityRPSMap.put(2.92,6.8);
-        ShooterVelocityRPSMap.put(2.12,6.0);
-        ShooterVelocityRPSMap.put(4.0, 7.25);
+        PivotPositionMap.put(2.08, .35);
+        PivotPositionMap.put(2.66,.15);
+        PivotPositionMap.put(3.5, .3);
+        ShooterVelocityRPSMap.put(2.08,6.7);
+        ShooterVelocityRPSMap.put(2.66,7.3);
+        ShooterVelocityRPSMap.put(3.5, 7.8);
         
 
     }
@@ -166,6 +166,9 @@ public class Shooter extends SubsystemBase {
             case SCORE -> {
                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
+                //  m_leaderPivotMotor.setControl(m_positionRequest.withPosition(.3));
+                //  m_followerPivotMotor.setControl(m_positionRequest.withPosition(.3));
+
             }
             case LOB -> {
                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(1.5));
@@ -185,6 +188,11 @@ public class Shooter extends SubsystemBase {
                 m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
                 m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
                 m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
+
+                // m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
+                // m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
+                // m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
+                // m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
             }
              case LOB -> {
                 m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(30));
