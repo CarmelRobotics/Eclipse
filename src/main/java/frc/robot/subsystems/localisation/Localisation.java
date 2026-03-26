@@ -93,10 +93,8 @@ public class Localisation extends SubsystemBase {
 
             if (estimate.tagCount > 0) {
                 final double xyStdDev;
-                if (estimate.tagCount >= 2) {
-                    xyStdDev = 0.1;
-                } else if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
-                    xyStdDev = 0.2;
+                if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
+                    xyStdDev = 0.25;
                 } else {
                     xyStdDev = Math.pow(0.5, estimate.avgTagDist + 1);
                 }

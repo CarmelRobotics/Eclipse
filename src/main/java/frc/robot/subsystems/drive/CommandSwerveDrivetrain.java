@@ -3,6 +3,7 @@ package frc.robot.subsystems.drive;
 import static edu.wpi.first.units.Units.*;
 
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.ctre.phoenix6.SignalLogger;
@@ -10,24 +11,38 @@ import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.swerve.SwerveDrivetrainConstants;
 import com.ctre.phoenix6.swerve.SwerveModuleConstants;
 import com.ctre.phoenix6.swerve.SwerveRequest;
+import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.commands.PathfindingCommand;
+import com.pathplanner.lib.config.ModuleConfig;
+import com.pathplanner.lib.config.PIDConstants;
+import com.pathplanner.lib.config.RobotConfig;
+import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
+import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
 import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
+import frc.robot.subsystems.localisation.LimelightHelpers;
+import frc.robot.subsystems.localisation.LimelightInfo;
+import frc.robot.subsystems.localisation.LocalisationConstants;
 
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
@@ -37,6 +52,10 @@ import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
  * https://v6.docs.ctr-electronics.com/en/stable/docs/tuner/tuner-swerve/index.html
  */
 public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
+    private final Field2d m_field = new Field2d();
+    private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
+    private Function<String, LimelightHelpers.PoseEstimate> limelightGetBotPoseEstimate;
+
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
     private double m_lastSimTime;
@@ -135,6 +154,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+        configureAutoBuilder();
     }
 
     /**
@@ -159,6 +179,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+        configureAutoBuilder();
     }
 
     /**
@@ -191,6 +212,41 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         if (Utils.isSimulation()) {
             startSimThread();
         }
+        configureAutoBuilder();
+    }
+
+    private void configureAutoBuilder() {
+        try {
+            var config = RobotConfig.fromGUISettings();
+            AutoBuilder.configure(
+                () -> getState().Pose,   // Supplier of current robot pose
+                this::resetPose,         // Consumer for seeding pose against auto
+                () -> getState().Speeds, // Supplier of current robot speeds
+                // Consumer of ChassisSpeeds and feedforwards to drive the robot
+                (speeds, feedforwards) -> setControl(
+                    m_pathApplyRobotSpeeds.withSpeeds(ChassisSpeeds.discretize(speeds, 0.020))
+                        .withWheelForceFeedforwardsX(feedforwards.robotRelativeForcesXNewtons())
+                        .withWheelForceFeedforwardsY(feedforwards.robotRelativeForcesYNewtons())
+                ),
+                new PPHolonomicDriveController(
+                    // PID constants for translation
+                    new PIDConstants(10, 0, 0),
+                    // PID constants for rotation
+                    new PIDConstants(7, 0, 0)
+                ),
+                config,
+                // Assume the path needs to be flipped for Red vs Blue, this is normally the case
+                () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
+                this // Subsystem for requirements
+            );
+        } catch (Exception ex) {
+            DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", ex.getStackTrace());
+        }
+
+        setLimelightPerspective(DriverStation.getAlliance().orElse(Alliance.Blue));
+
+        SmartDashboard.putData("Field", m_field);
+        CommandScheduler.getInstance().schedule(PathfindingCommand.warmupCommand());
     }
 
     /**
@@ -225,6 +281,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return m_sysIdRoutineToApply.dynamic(direction);
     }
 
+    private void setLimelightPerspective(Alliance alliance) {
+        limelightGetBotPoseEstimate = alliance == Alliance.Red
+            ? LimelightHelpers::getBotPoseEstimate_wpiBlue
+            : LimelightHelpers::getBotPoseEstimate_wpiRed;
+    }
+
     @Override
     public void periodic() {
         /*
@@ -243,8 +305,37 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 );
                 m_hasAppliedOperatorPerspective = true;
             });
+            
         }
-        SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
+        
+        for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
+            LimelightHelpers.SetRobotOrientation(
+                    limelight.name(), getState().Pose.getRotation().getDegrees(), 
+                    getPigeon2().getAngularVelocityZWorld().getValueAsDouble(), 
+                    0, 0, 0, 0
+                );
+
+            final LimelightHelpers.PoseEstimate estimate = limelightGetBotPoseEstimate.apply(limelight.name());
+
+            if (estimate == null) {
+                continue;
+            }
+
+            if (estimate.tagCount > 0) {
+                final double xyStdDev;
+                if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
+                    xyStdDev = 0.25;
+                } else {
+                    xyStdDev = Math.pow(0.5, estimate.avgTagDist + 1);
+                }
+
+                addVisionMeasurement(estimate.pose, estimate.timestampSeconds, VecBuilder.fill(xyStdDev, xyStdDev, Double.MAX_VALUE));
+            }
+        }
+
+        m_field.setRobotPose(getState().Pose);
+
+        //SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
     }
 
     private void startSimThread() {
@@ -302,7 +393,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     private final SwerveRequest.FieldCentricFacingAngle snapRequest =
         new SwerveRequest.FieldCentricFacingAngle();
-
+/*
 public Command snapToHub(Supplier<Double> xSpeed, Supplier<Double> ySpeed) {
     return applyRequest(() -> {
 
@@ -334,7 +425,7 @@ public Command snapToHub(Supplier<Double> xSpeed, Supplier<Double> ySpeed) {
             .withVelocityY(ySpeed.get())
             .withTargetDirection(targetAngle);
     });
-}
+}*/
 
     /**
      * Adds a vision measurement to the Kalman Filter. This will correct the odometry pose estimate

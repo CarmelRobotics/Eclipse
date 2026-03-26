@@ -30,7 +30,7 @@ public final class LocalisationConstants {
     );
     public static final PPHolonomicDriveController PathController = 
         new PPHolonomicDriveController(
-            new PIDConstants(10, 0, 0),
+            new PIDConstants(13.5, 4, 0),
             new PIDConstants(7, 0, 0)
         );
 }

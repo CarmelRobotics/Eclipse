@@ -91,7 +91,7 @@ public class Shooter extends SubsystemBase {
         PivotPositionMap.put(2.66,.15);
         PivotPositionMap.put(3.5, .3);
         ShooterVelocityRPSMap.put(2.08,6.7);
-        ShooterVelocityRPSMap.put(2.66,7.3);
+        ShooterVelocityRPSMap.put(2.66,7.1);
         ShooterVelocityRPSMap.put(3.5, 7.8);
         
 

@@ -17,6 +17,7 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
@@ -35,10 +36,10 @@ import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 public class RobotContainer {
   private PathPlannerAuto traj;
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
-  private final Localisation m_localisation = new Localisation(m_drivetrain);
+  //private final Localisation m_localisation = new Localisation(m_drivetrain);
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(() -> new Pose2d(),m_drivetrain);
-  private final Feeder m_feeder = new Feeder();
+  //private final Feeder m_feeder = new Feeder();
 
   private final CommandXboxController m_controller = new CommandXboxController(0);
 
@@ -146,26 +147,14 @@ m_controller.povUp().whileTrue(
   }
 
   public Command getAutonomousCommand() {
-    return Commands.sequence(
-       
-        Commands.runOnce(() -> {
-            m_shooter.setState(PivotState.SCORE);
-            m_shooter.setState(ShooterState.SCORE);
-        }, m_shooter),
+     PathPlannerPath path;
 
-        Commands.waitSeconds(0.5),
+    try {
+        path = PathPlannerPath.fromPathFile("goAuto");
+    } catch (Exception e) {
+        return Commands.print("IO Error");
+    }
 
-        Commands.run(() -> {
-            m_shooter.setState(IndexerState.SCORE);
-        }, m_shooter)
-    ).andThen(Commands.waitSeconds(4)).andThen(
-        () -> {
-        m_shooter.setState(IndexerState.ZERO);
-        m_shooter.setState(ShooterState.ZERO);
-        m_shooter.setState(PivotState.STOW);
-    });
-    //return AutoBuilder.buildAuto("doubleswipe");
-    //return m_drivetrain.applyRequest(()->driveRequest.withVelocityX(0).withVelocityY(-5)).andThen(Commands.runOnce(()->System.out.println("passed ")));
-    //return m_drivetrain.setPose(new Pose2d(3.536,7.365,Rotation2d.fromDegrees(0))).andThen(Commands.runOnce(()->m_lintake.setState(PinionState.GROUND)).andThen(AutoBuilder.pathfindToPose(new Pose2d(5.806,7.365, Rotation2d.fromDegrees(0)), new PathConstraints(1,1,540,540))));
+    return Commands.run(() -> AutoBuilder.followPath(path));
   }
 }

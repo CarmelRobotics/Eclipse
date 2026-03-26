@@ -34,8 +34,6 @@ public final class ShooterConstants {
     public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
 
-   
-
     private static final class PivotConfigs {
         
         private static final double kA = 0.01;
