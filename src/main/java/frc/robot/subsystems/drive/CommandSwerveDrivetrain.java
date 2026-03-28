@@ -296,17 +296,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          * Otherwise, only check and apply the operator perspective if the DS is disabled.
          * This ensures driving behavior doesn't change until an explicit disable event occurs during testing.
          */
-        if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
-            DriverStation.getAlliance().ifPresent(allianceColor -> {
-                setOperatorPerspectiveForward(
-                    allianceColor == Alliance.Red
-                        ? kRedAlliancePerspectiveRotation
-                        : kBlueAlliancePerspectiveRotation
-                );
-                m_hasAppliedOperatorPerspective = true;
-            });
+        // if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
+        //     DriverStation.getAlliance().ifPresent(allianceColor -> {
+        //         setOperatorPerspectiveForward(
+        //             allianceColor == Alliance.Red
+        //                 ? kRedAlliancePerspectiveRotation
+        //                 : kBlueAlliancePerspectiveRotation
+        //         );
+        //         m_hasAppliedOperatorPerspective = true;
+        //     });
             
-        }
+        // }
         
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
             LimelightHelpers.SetRobotOrientation(
@@ -321,12 +321,16 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 continue;
             }
 
+            if (DriverStation.isAutonomous() && estimate.avgTagDist > 3.33){
+                continue;
+            }
+
             if (estimate.tagCount > 0) {
                 final double xyStdDev;
                 if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
                     xyStdDev = 0.25;
                 } else {
-                    xyStdDev = Math.pow(0.5, estimate.avgTagDist + 1);
+                    xyStdDev = Math.pow(0.6, estimate.avgTagDist + 1);
                 }
 
                 addVisionMeasurement(estimate.pose, estimate.timestampSeconds, VecBuilder.fill(xyStdDev, xyStdDev, Double.MAX_VALUE));

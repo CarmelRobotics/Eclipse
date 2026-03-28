@@ -5,15 +5,45 @@
     "data": {
       "commands": [
         {
+          "type": "named",
+          "data": {
+            "name": "zerodrive"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake deploy"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake run"
+          }
+        },
+        {
           "type": "path",
           "data": {
-            "pathName": "testpath"
+            "pathName": "doubleswipe1"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "doubleswipe2"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "shoot"
           }
         }
       ]
     }
   },
-  "resetOdom": true,
+  "resetOdom": false,
   "folder": null,
   "choreoAuto": false
 }

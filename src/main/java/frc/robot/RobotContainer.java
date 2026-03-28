@@ -4,6 +4,7 @@
 
 package frc.robot;
 
+import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.pathplanner.lib.auto.AutoBuilder;
@@ -48,11 +49,14 @@ public class RobotContainer {
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
   public RobotContainer() {
+    SignalLogger.enableAutoLogging(false);
+
     traj = new PathPlannerAuto("testauto");
 
     //PathPlannerPath doubleswipeone = PathPlannerPath.fromPathFile("doubleswipe1");
-    //NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
-    //NamedCommands.registerCommand("intake retract", m_lintake.setState(PinionState.STOW));
+    NamedCommands.registerCommand("zerodrive", m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
+    NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
+    NamedCommands.registerCommand("intake retract", m_lintake.setState(PinionState.STOW));
     NamedCommands.registerCommand("intake run", Commands.runOnce(()->m_lintake.setState(RollerState.INTAKE)));
     NamedCommands.registerCommand("shoot",  Commands.sequence(Commands.runOnce(() -> {
             m_shooter.setState(PivotState.SCORE);
@@ -61,10 +65,11 @@ public class RobotContainer {
 
         Commands.waitSeconds(0.5),
 
-        Commands.run(() -> {
+        Commands.runOnce(() -> {
             m_shooter.setState(IndexerState.SCORE);
         }, m_shooter)
-    ).finallyDo(() -> {
+    ));
+    NamedCommands.registerCommand("stopshoot", Commands.runOnce(() -> {
         m_shooter.setState(IndexerState.ZERO);
         m_shooter.setState(ShooterState.ZERO);
         m_shooter.setState(PivotState.STOW);
@@ -147,14 +152,14 @@ m_controller.povUp().whileTrue(
   }
 
   public Command getAutonomousCommand() {
-     PathPlannerPath path;
+     //PathPlannerAuto auto;
 
-    try {
-        path = PathPlannerPath.fromPathFile("goAuto");
-    } catch (Exception e) {
-        return Commands.print("IO Error");
-    }
-
-    return Commands.run(() -> AutoBuilder.followPath(path));
+    // try {
+    //     auto = AutoBuilder.buildAuto(null)
+    // } catch (Exception e) {
+    //     return Commands.print("IO Error");
+    // }
+    m_drivetrain.setPose(new Pose2d(3.547,0.651,Rotation2d.fromDegrees(0)));
+    return AutoBuilder.buildAuto("testauto");
   }
 }
