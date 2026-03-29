@@ -171,7 +171,7 @@ m_controller.povUp().whileTrue(
             .withVelocityX(0)
             .withVelocityY(0)
             .withRotationalRate(0))
-        ),
+        ).withTimeout(1),
         Commands.sequence(
             Commands.runOnce(() -> {
             m_shooter.setState(PivotState.SCORE);
