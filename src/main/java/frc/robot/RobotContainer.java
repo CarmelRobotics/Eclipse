@@ -162,7 +162,32 @@ m_controller.povUp().whileTrue(
   }
 
   public Command getAutonomousCommand() {
-     PathPlannerPath auto;
+    return Commands.sequence(
+        m_drivetrain.applyRequest(() -> driveRequest
+            .withVelocityX(-0.5 * Constants.kMaxSpeed)
+            .withVelocityY(0)
+            .withRotationalRate(0)
+        ).withTimeout(1).andThen(m_drivetrain.applyRequest(() -> driveRequest
+            .withVelocityX(0)
+            .withVelocityY(0)
+            .withRotationalRate(0))
+        ),
+        Commands.sequence(
+            Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.SCORE);
+            m_shooter.setState(ShooterState.SCORE);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
+        Commands.run(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+        )
+    );
+
+    /* 
+    PathPlannerPath auto;
 
     try {
         auto = PathPlannerPath.fromPathFile("eightauto");
@@ -184,5 +209,6 @@ m_controller.povUp().whileTrue(
             m_shooter.setState(IndexerState.SCORE);
         }, m_shooter)
     );
+    */
   }
 }
