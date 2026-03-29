@@ -164,7 +164,7 @@ m_controller.povUp().whileTrue(
   public Command getAutonomousCommand() {
     return Commands.sequence(
         m_drivetrain.applyRequest(() -> driveRequest
-            .withVelocityX(-0.5 * Constants.kMaxSpeed)
+            .withVelocityX(0.5 * Constants.kMaxSpeed)
             .withVelocityY(0)
             .withRotationalRate(0)
         ).withTimeout(1).andThen(m_drivetrain.applyRequest(() -> driveRequest
