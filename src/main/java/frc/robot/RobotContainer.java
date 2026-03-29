@@ -16,6 +16,8 @@ import com.pathplanner.lib.trajectory.PathPlannerTrajectory;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SequentialCommandGroup;
@@ -35,8 +37,12 @@ import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 
 public class RobotContainer {
+
+
   private PathPlannerAuto traj;
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
+  SendableChooser<Command> autoSelection = AutoBuilder.buildAutoChooser();
+  
   //private final Localisation m_localisation = new Localisation(m_drivetrain);
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(() -> new Pose2d(),m_drivetrain);
@@ -49,6 +55,9 @@ public class RobotContainer {
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
   public RobotContainer() {
+    SmartDashboard.putData(autoSelection);
+
+   
     SignalLogger.enableAutoLogging(false);
 
     traj = new PathPlannerAuto("testauto");
@@ -149,17 +158,31 @@ m_controller.povUp().whileTrue(
 );
     m_controller.leftBumper().onTrue(m_lintake.setState(PinionState.GROUND));
     m_controller.rightBumper().onTrue(m_lintake.setState(PinionState.STOW));
+   // m_controller.a().onTrue(m_lintake.extend());
   }
 
   public Command getAutonomousCommand() {
-     //PathPlannerAuto auto;
+     PathPlannerPath auto;
 
-    // try {
-    //     auto = AutoBuilder.buildAuto(null)
-    // } catch (Exception e) {
-    //     return Commands.print("IO Error");
-    // }
-    m_drivetrain.setPose(new Pose2d(3.547,0.651,Rotation2d.fromDegrees(0)));
-    return AutoBuilder.buildAuto("testauto");
+    try {
+        auto = PathPlannerPath.fromPathFile("eightauto");
+        m_drivetrain.setPose(auto.getStartingHolonomicPose().get());
+    } catch (Exception e) {
+        return Commands.print("IO Error");
+    }
+    
+    //return autoSelection.getSelected();
+
+    return Commands.sequence(Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.SCORE);
+            m_shooter.setState(ShooterState.SCORE);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
+        Commands.runOnce(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+    );
   }
 }

@@ -283,8 +283,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     private void setLimelightPerspective(Alliance alliance) {
         limelightGetBotPoseEstimate = alliance == Alliance.Red
-            ? LimelightHelpers::getBotPoseEstimate_wpiBlue
-            : LimelightHelpers::getBotPoseEstimate_wpiRed;
+            ? LimelightHelpers::getBotPoseEstimate_wpiRed
+            : LimelightHelpers::getBotPoseEstimate_wpiBlue;
     }
 
     @Override
@@ -296,17 +296,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          * Otherwise, only check and apply the operator perspective if the DS is disabled.
          * This ensures driving behavior doesn't change until an explicit disable event occurs during testing.
          */
-        // if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
-        //     DriverStation.getAlliance().ifPresent(allianceColor -> {
-        //         setOperatorPerspectiveForward(
-        //             allianceColor == Alliance.Red
-        //                 ? kRedAlliancePerspectiveRotation
-        //                 : kBlueAlliancePerspectiveRotation
-        //         );
-        //         m_hasAppliedOperatorPerspective = true;
-        //     });
+        if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
+            DriverStation.getAlliance().ifPresent(allianceColor -> {
+                setOperatorPerspectiveForward(
+                    allianceColor == Alliance.Red
+                        ? kRedAlliancePerspectiveRotation
+                        : kBlueAlliancePerspectiveRotation
+                );
+                m_hasAppliedOperatorPerspective = true;
+            });
             
-        // }
+        }
         
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
             LimelightHelpers.SetRobotOrientation(
@@ -320,10 +320,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             if (estimate == null) {
                 continue;
             }
-
+            /*
             if (DriverStation.isAutonomous() && estimate.avgTagDist > 3.33){
                 continue;
-            }
+            }*/
 
             if (estimate.tagCount > 0) {
                 final double xyStdDev;
