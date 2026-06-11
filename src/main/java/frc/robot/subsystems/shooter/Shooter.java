@@ -10,6 +10,8 @@ import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 
+//import dev.doglog.DogLog;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
@@ -26,9 +28,13 @@ import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 
 public class Shooter extends SubsystemBase {
+   // private ShooterCalculator calc = new ShooterCalculator();
+
     private final TalonFX m_indexerMotor = new TalonFX(ShooterConstants.kIndexerMotorId);
 
     public static InterpolatingDoubleTreeMap PivotPositionMap =  new InterpolatingDoubleTreeMap();
+     
+    
     
     public static InterpolatingDoubleTreeMap ShooterVelocityRPSMap = new InterpolatingDoubleTreeMap();
 
@@ -90,9 +96,9 @@ public class Shooter extends SubsystemBase {
         PivotPositionMap.put(2.08, .35);
         PivotPositionMap.put(2.66,.15);
         PivotPositionMap.put(3.5, .3);
-        ShooterVelocityRPSMap.put(2.08,6.7);
-        ShooterVelocityRPSMap.put(2.66,7.1);
-        ShooterVelocityRPSMap.put(3.5, 7.8);
+        ShooterVelocityRPSMap.put(1.97,7.0);
+        ShooterVelocityRPSMap.put(2.23,7.25);
+       // ShooterVelocityRPSMap.put(3.5, 7.8);
         
 
     }
@@ -127,6 +133,9 @@ public class Shooter extends SubsystemBase {
             this.m_leaderPivotMotor.setPosition(0);
         });
     }
+    public double f(double x) {
+        return  (Math.pow(x, 1.4)) + 4.75;
+    }
 
     private void shoot() {
         final double distance = m_poseSupplier.get().getTranslation().getDistance(m_hubPosition);
@@ -138,6 +147,12 @@ public class Shooter extends SubsystemBase {
         final double distance = m_poseSupplier.get().getTranslation().getDistance(m_hubPosition);
         final double position = PivotPositionMap.get(distance);
         m_leaderPivotMotor.setControl(m_positionRequest.withPosition(position));
+    }
+
+    public double getAvgShooterCurrentDraw(){
+        var sum = m_leftLeaderShooterMotor.getSupplyCurrent().getValueAsDouble() + m_backLeftFollowerShooterMotor.getSupplyCurrent().getValueAsDouble() + m_rightFollowerShooterMotor.getSupplyCurrent().getValueAsDouble() + m_backRightFollowerShooterMotor.getSupplyCurrent().getValueAsDouble();
+        return sum / 4;
+
     }
 
     @Override
@@ -155,39 +170,45 @@ public class Shooter extends SubsystemBase {
         m_indexerMotor.setControl(m_velocityRequest.withVelocity(m_indexerState.velocity));
         */
 
-        SmartDashboard.putNumber("interpolated velocity", ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub()));
+        SmartDashboard.putNumber("interpolated velocity", f(m_drive.getDistanceToClosestHub()));
 
 
         switch (m_pivotState) {
+            
             case STOW -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0.1));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(0.1));
+                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(-0));
+                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(-0));
             }
             case SCORE -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(PivotPositionMap.get(m_drive.getDistanceToClosestHub())));
-                //  m_leaderPivotMotor.setControl(m_positionRequest.withPosition(.3));
-                //  m_followerPivotMotor.setControl(m_positionRequest.withPosition(.3));
+                //var angle = ShooterCalculator.calculate(m_drive.getDistanceToClosestHub(), 0).angleDegrees();
+
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(0));
+                //   m_leaderPivotMotor.setControl(m_positionRequest.withPosition(.3));
+                //   m_followerPivotMotor.setControl(m_positionRequest.withPosition(.3));
 
             }
             case LOB -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(1.5));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(1.5));
+                // m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0.45));
+                // m_followerPivotMotor.setControl(m_positionRequest.withPosition(0.45));
             }
         }
+        
 
         switch (m_shooterState) {
             case ZERO -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(0));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(0.5));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0.5));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0.5));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(0.5));
             }
             case SCORE -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(ShooterVelocityRPSMap.get(m_drive.getDistanceToClosestHub())));
+               
+
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(47));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(47));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(47));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(47));
 
                 // m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
                 // m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
@@ -195,20 +216,25 @@ public class Shooter extends SubsystemBase {
                 // m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(7.8));
             }
              case LOB -> {
-                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(30));
-                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(30));
-                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(20));
-                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(30));
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(40));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(40));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(40));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(40));
+            }
+            case SEND ->{
+                m_leftLeaderShooterMotor.setControl(m_velocityRequest.withVelocity(90));
+                m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(90));
+                m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(90));
+                m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(90));
             }
             
         }
         
         m_indexerMotor.setVoltage(m_indexerState.velocity.magnitude());
-
-        SmartDashboard.putString(ShooterConstants.kShooterIndexerStateKey, m_indexerState.toString());
-        SmartDashboard.putString(ShooterConstants.kShooterPivotStateKey, m_pivotState.toString());
-       // SmartDashboard.putNumber(ShooterConstants.kShooterPositionKey, m_leaderPivotMotor.getPosition().getValueAsDouble());
-       // SmartDashboard.putNumber(ShooterConstants.kShooterVelocityKey, m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
+       // DogLog.log("Shooter avg current draw", getAvgShooterCurrentDraw(), "amps");
+       SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
+       SmartDashboard.putNumber("shooter position", m_leaderPivotMotor.getPosition().getValueAsDouble());
         SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
+        SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
     }
 }

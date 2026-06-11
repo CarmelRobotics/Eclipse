@@ -119,6 +119,11 @@ public class RobotContainer {
     }, () -> {
       m_lintake.setState(RollerState.ZERO);
     }, m_lintake));
+    m_controller.povLeft().whileTrue(Commands.runEnd(() -> {
+      m_lintake.setState(RollerState.EJECT);
+    }, () -> {
+      m_lintake.setState(RollerState.ZERO);
+    }, m_lintake));
    m_controller.rightTrigger().whileTrue(
     Commands.sequence(
        
@@ -147,6 +152,25 @@ m_controller.povUp().whileTrue(
 
         Commands.waitSeconds(0.5),
 
+
+        Commands.run(() -> {
+            m_shooter.setState(IndexerState.SCORE);
+        }, m_shooter)
+    ).finallyDo(() -> {
+        m_shooter.setState(IndexerState.ZERO);
+        m_shooter.setState(ShooterState.ZERO);
+        m_shooter.setState(PivotState.STOW);
+    })
+);
+m_controller.povRight().whileTrue(
+    Commands.sequence(
+        Commands.runOnce(() -> {
+            m_shooter.setState(PivotState.LOB);
+            m_shooter.setState(ShooterState.SEND);
+        }, m_shooter),
+
+        Commands.waitSeconds(0.5),
+
         Commands.run(() -> {
             m_shooter.setState(IndexerState.SCORE);
         }, m_shooter)
@@ -157,17 +181,19 @@ m_controller.povUp().whileTrue(
     })
 );
     m_controller.leftBumper().onTrue(m_lintake.setState(PinionState.GROUND));
+    m_controller.x().onTrue(m_lintake.setState(PinionState.AGITATE));
     m_controller.rightBumper().onTrue(m_lintake.setState(PinionState.STOW));
    // m_controller.a().onTrue(m_lintake.extend());
   }
 
   public Command getAutonomousCommand() {
     return Commands.sequence(
+        Commands.runOnce(m_drivetrain::seedFieldCentric, m_drivetrain),
         m_drivetrain.applyRequest(() -> driveRequest
-            .withVelocityX(0.5 * Constants.kMaxSpeed)
+            .withVelocityX(0.25 * Constants.kMaxSpeed)
             .withVelocityY(0)
-            .withRotationalRate(0)
-        ).withTimeout(1).andThen(m_drivetrain.applyRequest(() -> driveRequest
+            .withRotationalRate(0.05 * Constants.kMaxAngularRate)
+        ).withTimeout(0.75).andThen(m_drivetrain.applyRequest(() -> driveRequest
             .withVelocityX(0)
             .withVelocityY(0)
             .withRotationalRate(0))

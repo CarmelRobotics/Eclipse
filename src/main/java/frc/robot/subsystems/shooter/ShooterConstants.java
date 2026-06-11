@@ -58,13 +58,13 @@ public final class ShooterConstants {
 
     private static final class ShooterConfigs {
         private static final double kS = 0;
-        private static final double kV = 1;
-        private static final double kP = 0;
+        private static final double kV = .125;
+        private static final double kP = .125;
         private static final double kI = 0;
         private static final double kD = 0;
 
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-            .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS).withKA(.05);
+            .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS).withKA(.2);
     }
 
     private static final class IndexerConfigs {
@@ -102,12 +102,13 @@ public final class ShooterConstants {
     public enum ShooterState {
         ZERO,
         SCORE,
-        LOB;
+        LOB,
+        SEND;
     }
 
     public enum IndexerState {
         ZERO(RotationsPerSecond.of(0)),
-        SCORE(RotationsPerSecond.of(-12));
+        SCORE(RotationsPerSecond.of(-4.5));
 
         public final AngularVelocity velocity;
 

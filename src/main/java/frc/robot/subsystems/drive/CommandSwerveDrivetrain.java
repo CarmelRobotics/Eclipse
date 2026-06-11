@@ -339,7 +339,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
         m_field.setRobotPose(getState().Pose);
 
-        //SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
+        SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
     }
 
     private void startSimThread() {

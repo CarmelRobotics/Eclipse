@@ -30,8 +30,8 @@ public final class LintakeConstants {
         private static final double kA = 0.01;
         private static final double kD = 0.15;
         private static final double kI = 0;
-        private static final double kP = 1.5;
-        private static final double kS = 0.025;
+        private static final double kP = 1.25;
+        private static final double kS = 0;
         private static final double kV = 0.25;
 
         private static final double kMotionMagicCruiseVelocity = 55;
@@ -68,8 +68,9 @@ public final class LintakeConstants {
     public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
 
     public enum PinionState {
-        STOW(0),
-        GROUND(-10.25);
+        STOW(-4),
+        AGITATE(-7.5),
+        GROUND(-12);
 
         public final double position;
 
@@ -80,7 +81,7 @@ public final class LintakeConstants {
 
     public enum RollerState {
         ZERO(0),
-        EJECT(12),
+        EJECT(-12),
         INTAKE(12),
         SCORE(12);
 
