@@ -9,11 +9,11 @@ import java.util.function.Supplier;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.swerve.SwerveDrivetrainConstants;
+import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveModuleConstants;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.PathfindingCommand;
-import com.pathplanner.lib.config.ModuleConfig;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
@@ -27,7 +27,6 @@ import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
@@ -39,10 +38,12 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
+import frc.robot.Constants;
 import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
 import frc.robot.subsystems.localisation.LimelightHelpers;
 import frc.robot.subsystems.localisation.LimelightInfo;
 import frc.robot.subsystems.localisation.LocalisationConstants;
+import frc.robot.subsystems.shooter.ShooterConstants;
 
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
@@ -54,7 +55,9 @@ import frc.robot.subsystems.localisation.LocalisationConstants;
 public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
     private final Field2d m_field = new Field2d();
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
-    private Function<String, LimelightHelpers.PoseEstimate> limelightGetBotPoseEstimate;
+    private Function<String, LimelightHelpers.PoseEstimate> limelightGetBotPoseEstimate =
+        LimelightHelpers::getBotPoseEstimate_wpiBlue;
+    private int m_rejectedVisionMeasurements = 0;
 
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
@@ -66,6 +69,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.k180deg;
     /* Keep track if we've ever applied the operator perspective before or not */
     private boolean m_hasAppliedOperatorPerspective = false;
+    private Optional<Alliance> m_lastAlliance = Optional.empty();
 
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
@@ -244,6 +248,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         }
 
         setLimelightPerspective(DriverStation.getAlliance().orElse(Alliance.Blue));
+        m_lastAlliance = Optional.of(DriverStation.getAlliance().orElse(Alliance.Blue));
+        updateAllianceDependentState();
+        snapRequest.HeadingController.setP(8);
+        snapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
 
         SmartDashboard.putData("Field", m_field);
         CommandScheduler.getInstance().schedule(PathfindingCommand.warmupCommand());
@@ -287,6 +295,24 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             : LimelightHelpers::getBotPoseEstimate_wpiBlue;
     }
 
+    private void updateAllianceDependentState() {
+        DriverStation.getAlliance().ifPresent(allianceColor -> {
+            if (!m_lastAlliance.equals(Optional.of(allianceColor))) {
+                setLimelightPerspective(allianceColor);
+                m_lastAlliance = Optional.of(allianceColor);
+            }
+
+            if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
+                setOperatorPerspectiveForward(
+                    allianceColor == Alliance.Red
+                        ? kRedAlliancePerspectiveRotation
+                        : kBlueAlliancePerspectiveRotation
+                );
+                m_hasAppliedOperatorPerspective = true;
+            }
+        });
+    }
+
     @Override
     public void periodic() {
         /*
@@ -296,16 +322,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          * Otherwise, only check and apply the operator perspective if the DS is disabled.
          * This ensures driving behavior doesn't change until an explicit disable event occurs during testing.
          */
-        if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
-            DriverStation.getAlliance().ifPresent(allianceColor -> {
-                setOperatorPerspectiveForward(
-                    allianceColor == Alliance.Red
-                        ? kRedAlliancePerspectiveRotation
-                        : kBlueAlliancePerspectiveRotation
-                );
-                m_hasAppliedOperatorPerspective = true;
-            });
-            
+        updateAllianceDependentState();
+
+        if (DriverStation.isAutonomous()) {
+            m_field.setRobotPose(getState().Pose);
+            SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
+            return;
         }
         
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
@@ -320,12 +342,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             if (estimate == null) {
                 continue;
             }
-            /*
-            if (DriverStation.isAutonomous() && estimate.avgTagDist > 3.33){
-                continue;
-            }*/
-
             if (estimate.tagCount > 0) {
+                double poseDelta = estimate.pose.getTranslation().getDistance(getState().Pose.getTranslation());
+                if (poseDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
+                    m_rejectedVisionMeasurements++;
+                    continue;
+                }
+
                 final double xyStdDev;
                 if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
                     xyStdDev = 0.25;
@@ -340,6 +363,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         m_field.setRobotPose(getState().Pose);
 
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
+        SmartDashboard.putNumber("shot distance", getShotDistance());
+        SmartDashboard.putNumber("shot compensated heading deg", getHubHeading().getDegrees());
+        SmartDashboard.putNumber("shot heading error deg", getHubHeadingError().getDegrees());
+        SmartDashboard.putNumber("shot compensated vector x", getMotionCompensatedShotVector().getX());
+        SmartDashboard.putNumber("shot compensated vector y", getMotionCompensatedShotVector().getY());
+        SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);
     }
 
     private void startSimThread() {
@@ -368,68 +397,73 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     public void addVisionMeasurement(Pose2d visionRobotPoseMeters, double timestampSeconds) {
         super.addVisionMeasurement(visionRobotPoseMeters, Utils.fpgaToCurrentTime(timestampSeconds));
     }
-    public Command setPose(Pose2d pose){
-       return run(()-> this.getState().Pose = pose);
+    public Command setPose(Pose2d pose) {
+       return run(() -> this.getState().Pose = pose);
     }
 
     public double getDistanceToClosestHub() {
-    Pose2d robotPose = this.getState().Pose;
-
-    Translation2d robot = robotPose.getTranslation();
-
-    // Example hub positions (meters) — replace with real field coordinates
-    Translation2d[] hubs = {
-        new Translation2d(4.623, 4.0),
-        new Translation2d(11.907, 4.0),
-   };
-
-    double closest = Double.MAX_VALUE;
-
-    for (Translation2d hub : hubs) {
-        double dist = robot.getDistance(hub);
-        if (dist < closest) {
-            closest = dist;
-        }
+        return getState().Pose.getTranslation().getDistance(getHubPosition());
     }
 
-    return MathUtil.clamp(closest, 0, 6);
-}
+    public Translation2d getHubPosition() {
+        return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+            ? ShooterConstants.kRedHubPosition
+            : ShooterConstants.kBlueHubPosition;
+    }
+
+    public ChassisSpeeds getFieldRelativeSpeeds() {
+        return ChassisSpeeds.fromRobotRelativeSpeeds(getState().Speeds, getState().Pose.getRotation());
+    }
+
+    public double getShotTimeOfFlightSeconds() {
+        double offset = SmartDashboard.getNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
+        return Math.max(0.001, ShooterConstants.getShotTimeOfFlightSeconds(getDistanceToClosestHub()) + offset);
+    }
+
+    public Translation2d getMotionCompensatedShotVector() {
+        Translation2d robotToHub = getHubPosition().minus(getState().Pose.getTranslation());
+        double timeOfFlight = getShotTimeOfFlightSeconds();
+        ChassisSpeeds fieldSpeeds = getFieldRelativeSpeeds();
+
+        Translation2d requiredFieldVelocity = robotToHub.div(timeOfFlight);
+        Translation2d requiredRobotRelativeShotVelocity = requiredFieldVelocity.minus(
+            new Translation2d(fieldSpeeds.vxMetersPerSecond, fieldSpeeds.vyMetersPerSecond)
+        );
+
+        return requiredRobotRelativeShotVelocity.times(timeOfFlight);
+    }
+
+    public Translation2d getCompensatedHubPosition() {
+        return getState().Pose.getTranslation().plus(getMotionCompensatedShotVector());
+    }
+
+    public double getShotDistance() {
+        return MathUtil.clamp(getMotionCompensatedShotVector().getNorm(), 0, 6);
+    }
+
+    public Rotation2d getHubHeading() {
+        Rotation2d shotHeading = getMotionCompensatedShotVector().getAngle();
+        return shotHeading.plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
+    }
+
+    public Rotation2d getHubHeadingError() {
+        return Rotation2d.fromRadians(
+            MathUtil.angleModulus(getHubHeading().minus(getState().Pose.getRotation()).getRadians())
+        );
+    }
+
+    public Command faceHubCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity) {
+        return applyRequest(() -> snapRequest
+            .withVelocityX(xVelocity.get())
+            .withVelocityY(yVelocity.get())
+            .withDeadband(Constants.kMaxSpeed * 0.1)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
+            .withTargetDirection(getHubHeading())
+        );
+    }
 
     private final SwerveRequest.FieldCentricFacingAngle snapRequest =
         new SwerveRequest.FieldCentricFacingAngle();
-/*
-public Command snapToHub(Supplier<Double> xSpeed, Supplier<Double> ySpeed) {
-    return applyRequest(() -> {
-
-        Pose2d robotPose = this.getState().Pose;
-        Translation2d robot = robotPose.getTranslation();
-
-        Translation2d[] hubs = {
-            new Translation2d(4.623, 4.0),
-            new Translation2d(11.907, 4.0),
-        };
-
-        Translation2d closestHub = hubs[0];
-        double closest = Double.MAX_VALUE;
-
-        for (Translation2d hub : hubs) {
-            double dist = robot.getDistance(hub);
-            if (dist < closest) {
-                closest = dist;
-                closestHub = hub;
-            }
-        }
-
-        Translation2d diff = closestHub.minus(robot);
-
-        Rotation2d targetAngle = new Rotation2d(diff.getX(), diff.getY());
-
-        return snapRequest
-            .withVelocityX(xSpeed.get())
-            .withVelocityY(ySpeed.get())
-            .withTargetDirection(targetAngle);
-    });
-}*/
 
     /**
      * Adds a vision measurement to the Kalman Filter. This will correct the odometry pose estimate
@@ -464,3 +498,4 @@ public Command snapToHub(Supplier<Double> xSpeed, Supplier<Double> ySpeed) {
         return super.samplePoseAt(Utils.fpgaToCurrentTime(timestampSeconds));
     }
 }
+

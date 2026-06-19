@@ -72,8 +72,8 @@ public class Localisation extends SubsystemBase {
         final Rotation2d perspective = alliance == Alliance.Red ? Rotation2d.k180deg : Rotation2d.kZero;
         m_drivetrain.setOperatorPerspectiveForward(perspective);
         limelightGetBotPoseEstimate = alliance == Alliance.Red
-            ? LimelightHelpers::getBotPoseEstimate_wpiBlue
-            : LimelightHelpers::getBotPoseEstimate_wpiRed;
+            ? LimelightHelpers::getBotPoseEstimate_wpiRed
+            : LimelightHelpers::getBotPoseEstimate_wpiBlue;
         resetPose(new Pose2d(0, 0, perspective));
     }
 

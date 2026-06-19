@@ -7,12 +7,6 @@
         {
           "type": "named",
           "data": {
-            "name": "zerodrive"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
             "name": "intake deploy"
           }
         },
@@ -43,7 +37,7 @@
       ]
     }
   },
-  "resetOdom": false,
+  "resetOdom": true,
   "folder": null,
   "choreoAuto": false
 }

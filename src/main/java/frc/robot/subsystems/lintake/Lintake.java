@@ -1,10 +1,7 @@
 package frc.robot.subsystems.lintake;
 
-import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
-import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -19,7 +16,6 @@ public class Lintake extends SubsystemBase {
     private final TalonFX m_followerPinionMotor = new TalonFX(LintakeConstants.kFollowerPinionMotorId);
     private final TalonFX m_rollerMotor = new TalonFX(LintakeConstants.kRollerMotorId);
 
-    private final VelocityVoltage m_velocityRequest = new VelocityVoltage(0);
     private final MotionMagicVoltage m_positionRequest = new MotionMagicVoltage(0);
 
     private PinionState m_pinionState = PinionState.STOW;

@@ -1,7 +1,5 @@
 package frc.robot.subsystems.shooter;
 
-import static edu.wpi.first.units.Units.RotationsPerSecond;
-
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
@@ -10,11 +8,9 @@ import com.ctre.phoenix6.signals.InvertedValue;
 
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
-import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.math.util.Units;
 
 public final class ShooterConstants {
-    // TODO: Configure constants
-
     public static final String kShooterPivotStateKey = "ShooterPivotState";
     public static final String kShooterIndexerStateKey = "ShooterIndexerState";
     public static final String kShooterPositionKey = "ShooterPosition";
@@ -33,6 +29,56 @@ public final class ShooterConstants {
 
     public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
+
+    public static final double kIdleShooterRps = 0.5;
+    public static final double kLobShooterRps = 40;
+    public static final double kSendShooterRps = 90;
+    public static final double kStowPivotPosition = 0;
+    public static final double kIndexerScoreVolts = -4.5;
+    public static final double kShooterHeadingOffsetRadians = Units.degreesToRadians(0);
+    public static final double kShooterReadyToleranceRps = 3.0;
+    public static final double kPivotReadyToleranceRotations = 0.04;
+    public static final double kHeadingReadyToleranceDegrees = 5.0;
+    public static final double kMaxShotDistanceMeters = 5.0;
+    public static final double kMaxVisionCorrectionMeters = 1.0;
+    public static final double kShotSpinupTimeoutSeconds = 1.25;
+
+    public static final String kPivotOffsetKey = "ShotTuning/PivotOffset";
+    public static final String kShooterRpsOffsetKey = "ShotTuning/ShooterRpsOffset";
+    public static final String kTimeOfFlightOffsetKey = "ShotTuning/TimeOfFlightOffset";
+
+    private static final InterpolatingDoubleTreeMap ScorePivotPositionByDistance = new InterpolatingDoubleTreeMap();
+    private static final InterpolatingDoubleTreeMap ScoreShooterRpsByDistance = new InterpolatingDoubleTreeMap();
+    private static final InterpolatingDoubleTreeMap ShotTimeOfFlightSecondsByDistance = new InterpolatingDoubleTreeMap();
+
+    static {
+        ScorePivotPositionByDistance.put(1.5, 0.0);
+        ScorePivotPositionByDistance.put(2.5, 0.0);
+        ScorePivotPositionByDistance.put(3.5, 0.0);
+        ScorePivotPositionByDistance.put(4.5, 0.0);
+
+        ScoreShooterRpsByDistance.put(1.5, 47.0);
+        ScoreShooterRpsByDistance.put(2.5, 47.0);
+        ScoreShooterRpsByDistance.put(3.5, 47.0);
+        ScoreShooterRpsByDistance.put(4.5, 47.0);
+
+        ShotTimeOfFlightSecondsByDistance.put(1.5, 0.18);
+        ShotTimeOfFlightSecondsByDistance.put(2.5, 0.24);
+        ShotTimeOfFlightSecondsByDistance.put(3.5, 0.30);
+        ShotTimeOfFlightSecondsByDistance.put(4.5, 0.36);
+    }
+
+    public static double getScorePivotPosition(double distanceMeters) {
+        return ScorePivotPositionByDistance.get(distanceMeters);
+    }
+
+    public static double getScoreShooterRps(double distanceMeters) {
+        return ScoreShooterRpsByDistance.get(distanceMeters);
+    }
+
+    public static double getShotTimeOfFlightSeconds(double distanceMeters) {
+        return ShotTimeOfFlightSecondsByDistance.get(distanceMeters);
+    }
 
     private static final class PivotConfigs {
         
@@ -107,13 +153,13 @@ public final class ShooterConstants {
     }
 
     public enum IndexerState {
-        ZERO(RotationsPerSecond.of(0)),
-        SCORE(RotationsPerSecond.of(-4.5));
+        ZERO(0),
+        SCORE(kIndexerScoreVolts);
 
-        public final AngularVelocity velocity;
+        public final double volts;
 
-        private IndexerState(AngularVelocity velocity) {
-            this.velocity = velocity;
+        private IndexerState(double volts) {
+            this.volts = volts;
         }
     }
 }
