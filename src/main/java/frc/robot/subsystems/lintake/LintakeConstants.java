@@ -1,95 +1,77 @@
 package frc.robot.subsystems.lintake;
 
-import static edu.wpi.first.units.Units.RotationsPerSecond;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.signals.InvertedValue;
+import com.ctre.phoenix6.signals.NeutralModeValue;
 
-import edu.wpi.first.units.measure.AngularVelocity;
-import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Time;
+import edu.wpi.first.units.measure.Voltage;
 
 public final class LintakeConstants {
-    // TODO: Configure constants
-
-    public static final String kPinionStateKey = "PinionState";
-    public static final String kRollerStateKey = "RollerState";
-    public static final String kRollerVoltageKey = "RollerVoltage";
-    public static final String kLeaderPinionPositionKey = "LeaderPinionPosition";
-    public static final String kFollowerPinionPositionKey = "FollowerPinionPosition";
-    public static final String kPinionPositionTargetKey = "PinionPositionTarget";
-
+    public static final String kRollerVoltageKey = "Lintake/RollerVoltage";
+    public static final String kPinionPositionKey = "Lintake/PinionPosition";
+    public static final String kPinionAtTargetKey = "Lintake/PinionAtTarget";
 
     public static final int kLeaderPinionMotorId = 35;
     public static final int kFollowerPinionMotorId = 2;
     public static final int kRollerMotorId = 45;
 
     private static final class PinionConfigs {
-        private static final double kA = 0.01;
-        private static final double kD = 0.15;
-        private static final double kI = 0;
-        private static final double kP = 1.25;
-        private static final double kS = 0;
-        private static final double kV = 0.25;
-
-        private static final double kMotionMagicCruiseVelocity = 55;
-        private static final double kMotionMagicAcceleration = 135;
-        private static final double kMotionMagicJerk = 1600;
-
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-            .withKA(kA).withKD(kD).withKI(kI).withKP(kP).withKS(kS).withKV(kV);
+            .withKA(0.01)
+            .withKD(0.15)
+            .withKI(0)
+            .withKP(1.25)
+            .withKS(0)
+            .withKV(0.25);
 
         private static final MotionMagicConfigs MotionMagicConfigs = new MotionMagicConfigs()
-            .withMotionMagicCruiseVelocity(kMotionMagicCruiseVelocity)
-            .withMotionMagicAcceleration(kMotionMagicAcceleration)
-            .withMotionMagicJerk(kMotionMagicJerk);
+            .withMotionMagicCruiseVelocity(55)
+            .withMotionMagicAcceleration(135)
+            .withMotionMagicJerk(1600);
     }
 
     private static final class RollerConfigs {
-        private static final double kS = 0.1;
-        private static final double kV = 0.12;
-        private static final double kP = 0.11;
-        private static final double kI = 0;
-        private static final double kD = 0.125;
-
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-            .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
+            .withKS(0.1)
+            .withKV(0.12)
+            .withKP(0.11)
+            .withKI(0)
+            .withKD(0.125);
     }
     
-    public static final TalonFXConfiguration LeaderPinionConfig = new TalonFXConfiguration()
+    public static final TalonFXConfiguration PinionTalonFXConfigs = new TalonFXConfiguration()
         .withSlot0(PinionConfigs.Slot0Configs).withMotionMagic(PinionConfigs.MotionMagicConfigs)
-        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
-    public static final TalonFXConfiguration FollowerPinionConfig = new TalonFXConfiguration()
-        .withSlot0(PinionConfigs.Slot0Configs).withMotionMagic(PinionConfigs.MotionMagicConfigs)
-        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
+        .withMotorOutput(new MotorOutputConfigs().withNeutralMode(NeutralModeValue.Brake));
 
-    public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
+    public static final TalonFXConfiguration RollerTalonFXConfigs = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
+
+    public static final Angle kStowAngle = Rotations.of(-4);
+    public static final Angle kAgitateStowAngle = Rotations.of(-7.5);
+    public static final Angle kDeployAngle = Rotations.of(-12); 
+
+    public static final Time kAgitateTimeout = Seconds.of(0.5);
+
+    public static final Voltage kIdleVoltage = Volts.zero();
+    public static final Voltage kEjectVoltage = Volts.of(-12);
+    public static final Voltage kIntakeVoltage = Volts.of(12);
 
     public enum PinionState {
-        STOW(-4),
-        AGITATE(-7.5),
-        GROUND(-12);
-
-        public final double position;
-
-        private PinionState(double position) {
-            this.position = position;
-        }
+        STOW,
+        AGITATE,
+        DEPLOY;
     }
 
     public enum RollerState {
-        ZERO(0),
-        EJECT(-12),
-        INTAKE(12),
-        SCORE(12);
-
-        public final double velocity;
-
-        private RollerState(double velocity) {
-            this.velocity = velocity;
-        }
+        IDLE,
+        EJECT,
+        INTAKE;
     }
-    
 }

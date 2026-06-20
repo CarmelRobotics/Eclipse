@@ -1,4 +1,4 @@
-package frc.robot.subsystems.localisation;
+package frc.robot.util;
 
 public record LimelightInfo(
     String name,

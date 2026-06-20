@@ -1,12 +1,14 @@
 package frc.robot.subsystems.lintake;
 
+import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
-import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -19,77 +21,81 @@ public class Lintake extends SubsystemBase {
     private final TalonFX m_followerPinionMotor = new TalonFX(LintakeConstants.kFollowerPinionMotorId);
     private final TalonFX m_rollerMotor = new TalonFX(LintakeConstants.kRollerMotorId);
 
-    private final VelocityVoltage m_velocityRequest = new VelocityVoltage(0);
-    private final MotionMagicVoltage m_positionRequest = new MotionMagicVoltage(0);
+    private final StatusSignal<Boolean> m_pinionAtTarget = m_leaderPinionMotor.getMotionMagicAtTarget();
+    private final StatusSignal<Angle> m_pinionAngle = m_leaderPinionMotor.getPosition();
+    private final StatusSignal<Voltage> m_rollerVoltage = m_rollerMotor.getMotorVoltage();
 
-    private PinionState m_pinionState = PinionState.STOW;
-    private RollerState m_rollerState = RollerState.ZERO;
+    private final VoltageOut m_voltageRequest = new VoltageOut(0);
+    private final MotionMagicVoltage m_positionRequest = new MotionMagicVoltage(0);
 
     public Lintake() {
         m_followerPinionMotor.setPosition(0);
         m_leaderPinionMotor.setPosition(0);
 
-        m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.LeaderPinionConfig);
-        m_followerPinionMotor.getConfigurator().apply(LintakeConstants.FollowerPinionConfig);
-        m_rollerMotor.getConfigurator().apply(LintakeConstants.RollerConfig);
+        m_leaderPinionMotor.getConfigurator().apply(LintakeConstants.PinionTalonFXConfigs);
+        m_followerPinionMotor.getConfigurator().apply(LintakeConstants.PinionTalonFXConfigs);
+        m_rollerMotor.getConfigurator().apply(LintakeConstants.RollerTalonFXConfigs);
 
-        m_leaderPinionMotor.setNeutralMode(NeutralModeValue.Brake);
-        m_followerPinionMotor.setNeutralMode(NeutralModeValue.Brake);
+        m_followerPinionMotor.setControl(new Follower(m_leaderPinionMotor.getDeviceID(), MotorAlignmentValue.Opposed));
+    }
 
-        m_rollerMotor.setNeutralMode(NeutralModeValue.Coast);
-        //m_followerPinionMotor.setControl(new Follower(m_leaderPinionMotor.getDeviceID(), MotorAlignmentValue.Opposed));
+    public boolean pinionHasReachedTarget() {
+        return m_pinionAtTarget.getValue().booleanValue();
     }
 
     public Command setState(PinionState pinionState) {
-        return runOnce(()->{
-            this.m_pinionState = pinionState;
+        return runFromPinionState(pinionState);
+    }
+    
+    public Command setState(RollerState rollerState) {
+        return runFromRollerState(rollerState);
+    }
+
+    private Command runPinionToAngle(Angle angle) {
+        return runOnce(() -> {
+            m_leaderPinionMotor.setControl(m_positionRequest.withPosition(angle));
         });
     }
 
-    public void setState(RollerState rollerState) {
-        m_rollerState = rollerState;
+    private Command runRollerToVoltage(Voltage voltage) {
+        return runOnce(() -> {
+            m_rollerMotor.setControl(m_voltageRequest.withOutput(voltage));
+        });
     }
 
-    
-    public Command extend(){
-        return Commands.runOnce(()-> {
-        m_leaderPinionMotor.setVoltage(3.25);
-        m_followerPinionMotor.setVoltage(3.25); }
-        ).andThen(Commands.waitSeconds(.25)).andThen(Commands.runOnce(()->{
-            m_leaderPinionMotor.setVoltage(0); 
-            m_followerPinionMotor.setVoltage(0);
-            m_leaderPinionMotor.setPosition(-9.50);
-            m_followerPinionMotor.setPosition(-9.50);
-        
-        } 
-            ));
+    private Command runFromPinionState(PinionState pinionState) {
+        return switch (pinionState) {
+            case STOW -> runPinionToAngle(LintakeConstants.kStowAngle);
+            case AGITATE -> defer(() -> {
+                final var lastAngle = m_pinionAngle.getValue();
+
+                return Commands.repeatingSequence(
+                        runPinionToAngle(LintakeConstants.kAgitateStowAngle),
+                        Commands.waitUntil(this::pinionHasReachedTarget)
+                                .withTimeout(LintakeConstants.kAgitateTimeout),
+                        runPinionToAngle(LintakeConstants.kDeployAngle),
+                        Commands.waitUntil(this::pinionHasReachedTarget)
+                                .withTimeout(LintakeConstants.kAgitateTimeout)
+                ).finallyDo(() -> {
+                    m_leaderPinionMotor.setControl(m_positionRequest.withPosition(lastAngle));   
+                });
+            });
+            case DEPLOY -> runPinionToAngle(LintakeConstants.kDeployAngle);
+        };
     }
-      public Command retract(){
-        return Commands.runOnce(()-> {
-        m_leaderPinionMotor.setVoltage(-3.25);
-        m_followerPinionMotor.setVoltage(-3.25); }
-        ).andThen(Commands.waitSeconds(.2)).andThen(Commands.runOnce(()->{
-            m_leaderPinionMotor.setVoltage(0); 
-            m_followerPinionMotor.setVoltage(0);} 
-            ));
+
+    private Command runFromRollerState(RollerState rollerState) {
+        return switch (rollerState) {
+            case IDLE -> runRollerToVoltage(LintakeConstants.kIdleVoltage);
+            case EJECT -> runRollerToVoltage(LintakeConstants.kEjectVoltage);
+            case INTAKE -> runRollerToVoltage(LintakeConstants.kIntakeVoltage);
+        };
     }
-    
 
     @Override
     public void periodic() {
-        m_rollerMotor.setVoltage(m_rollerState.velocity);
-
-        m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-         m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-       // m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());
-
-        SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
-        SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
-        SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
-        SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
-        SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, m_leaderPinionMotor.getPosition().getValueAsDouble());
-        SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
-
+        SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerVoltage.getValueAsDouble());
+        SmartDashboard.putNumber(LintakeConstants.kPinionPositionKey, m_pinionAngle.getValueAsDouble());
+        SmartDashboard.putBoolean(LintakeConstants.kPinionAtTargetKey, m_pinionAtTarget.getValue().booleanValue());
     }
-    
 }

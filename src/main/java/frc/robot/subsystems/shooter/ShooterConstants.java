@@ -1,27 +1,27 @@
 package frc.robot.subsystems.shooter;
 
+import static edu.wpi.first.units.Units.Rotations;
 import static edu.wpi.first.units.Units.RotationsPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
 
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.signals.InvertedValue;
+import com.ctre.phoenix6.signals.NeutralModeValue;
 
-import edu.wpi.first.math.geometry.Translation2d;
-import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
+import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Time;
 
 public final class ShooterConstants {
-    // TODO: Configure constants
+    public static final String kShooterPivotAtTargetKey = "Shooter/PivotAtTarget";
+    public static final String kShooterPivotPositionKey = "Shooter/PivotAngle";
+    public static final String kShooterRollerAtTargetKey = "Shooter/RollerAtTarget";
+    public static final String kShooterRollerVelocityKey = "Shooter/RollerVelocity";
+    public static final String kShooterKickerVelocityKey = "Shooter/KickerVelocity";
 
-    public static final String kShooterPivotStateKey = "ShooterPivotState";
-    public static final String kShooterIndexerStateKey = "ShooterIndexerState";
-    public static final String kShooterPositionKey = "ShooterPosition";
-    public static final String kShooterVelocityKey = "ShooterVelocity";
-    public static final String kShooterTargetPositionKey = "ShooterTargetPosition";
-
-    public static final int kIndexerMotorId = 53; // Kraken X44
+    public static final int kKickerMotorId = 53;
 
     public static final int kLeaderPivotMotorId = 5;
     public static final int kFollowerPivotMotorId = 6;
@@ -31,89 +31,82 @@ public final class ShooterConstants {
     public static final int kRightFollowerShooterMotorId = 11;
     public static final int kBackRightFollowerShooterMotorId = 49;
 
-    public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
-    public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
-
     private static final class PivotConfigs {
-        
-        private static final double kA = 0.01;
-        private static final double kD = 0.1;
-        private static final double kI = 0;
-        private static final double kP = 4.8;
-        private static final double kS = 0.25;
-        private static final double kV = 0.12;
-
-        private static final double kMotionMagicCruiseVelocity = 80;
-        private static final double kMotionMagicAcceleration = 160;
-        private static final double kMotionMagicJerk = 1600;
-
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-            .withKA(kA).withKD(kD).withKI(kI).withKP(kP).withKS(kS).withKV(kV);
+            .withKA(0.01)
+            .withKD(0.1)
+            .withKI(0)
+            .withKP(4.8)
+            .withKS(0.25)
+            .withKV(0.12);
 
         private static final MotionMagicConfigs MotionMagicConfigs = new MotionMagicConfigs()
-            .withMotionMagicCruiseVelocity(kMotionMagicCruiseVelocity)
-            .withMotionMagicAcceleration(kMotionMagicAcceleration)
-            .withMotionMagicJerk(kMotionMagicJerk);
+            .withMotionMagicCruiseVelocity(80)
+            .withMotionMagicAcceleration(160)
+            .withMotionMagicJerk(1600);
     }
 
     private static final class ShooterConfigs {
-        private static final double kS = 0;
-        private static final double kV = .125;
-        private static final double kP = .125;
-        private static final double kI = 0;
-        private static final double kD = 0;
-
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-            .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS).withKA(.2);
+            .withKD(0)
+            .withKI(0)
+            .withKP(0.125)
+            .withKV(0.125)
+            .withKS(0)
+            .withKA(.2);
     }
 
-    private static final class IndexerConfigs {
-        private static final double kS = 0.1;
-        private static final double kV = 0.12;
-        private static final double kP = 0.11;
-        private static final double kI = 0;
-        private static final double kD = 0;
-
+    private static final class KickerConfigs {
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
-            .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
+            .withKD(0)
+            .withKI(0)
+            .withKP(0.11)
+            .withKV(0.12)
+            .withKS(0.1);
     }
 
-    public static final TalonFXConfiguration LeaderPivotConfig = new TalonFXConfiguration()
+    public static final TalonFXConfiguration PivotTalonFXConfigs = new TalonFXConfiguration()
         .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs)
-        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
-    
-    public static final TalonFXConfiguration FollowerPivotConfig = new TalonFXConfiguration()
-        .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs)
-        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
+        .withMotorOutput(new MotorOutputConfigs().withNeutralMode(NeutralModeValue.Brake));
 
-    public static final TalonFXConfiguration LeftShooterConfig = new TalonFXConfiguration()
-        .withSlot0(ShooterConfigs.Slot0Configs).withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
-    public static final TalonFXConfiguration RightShooterConfig = new TalonFXConfiguration()
-        .withSlot0(ShooterConfigs.Slot0Configs).withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
+    public static final TalonFXConfiguration RollerTalonFXConfigs = new TalonFXConfiguration()
+        .withSlot0(ShooterConfigs.Slot0Configs);
 
-    public static final TalonFXConfiguration IndexerConfig = new TalonFXConfiguration().withSlot0(IndexerConfigs.Slot0Configs);
+    public static final TalonFXConfiguration KickerTalonFXConfigs = new TalonFXConfiguration()
+        .withSlot0(KickerConfigs.Slot0Configs);
+
+    public static final double kRollerVelocityErrorTolerance = 2.0;
+    public static final Time kFeedTimeout = Seconds.of(1);
+
+    public static final Angle kPivotStowAngle = Rotations.zero();
+    public static final Angle kPivotLobAngle = Rotations.zero();
+    public static final Angle kPivotSendAngle = Rotations.zero();
+    public static final Angle kPivotScoreAngle = Rotations.zero();
+
+    public static final AngularVelocity kRollerIdleVelocity = RotationsPerSecond.of(0.5);
+    public static final AngularVelocity kRollerLobVelocity = RotationsPerSecond.of(40);
+    public static final AngularVelocity kRollerSendVelocity = RotationsPerSecond.of(90);
+    public static final AngularVelocity kRollerScoreVelocity = RotationsPerSecond.of(47);
+
+    public static final AngularVelocity kKickerIdleVelocity = RotationsPerSecond.of(0);
+    public static final AngularVelocity kkickerFeedVelocity = RotationsPerSecond.of(-4.5);
 
     public enum PivotState {
         STOW,
-        SCORE,
-        LOB;
+        LOB,
+        SEND,
+        SCORE;
     }
 
     public enum ShooterState {
-        ZERO,
-        SCORE,
+        IDLE,
         LOB,
-        SEND;
+        SEND,
+        SCORE;
     }
 
-    public enum IndexerState {
-        ZERO(RotationsPerSecond.of(0)),
-        SCORE(RotationsPerSecond.of(-4.5));
-
-        public final AngularVelocity velocity;
-
-        private IndexerState(AngularVelocity velocity) {
-            this.velocity = velocity;
-        }
+    public enum KickerState {
+        IDLE,
+        FEED;
     }
 }
