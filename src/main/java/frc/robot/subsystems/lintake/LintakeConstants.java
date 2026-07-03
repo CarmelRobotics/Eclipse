@@ -63,7 +63,8 @@ public final class LintakeConstants {
     public enum PinionState {
         STOW(-4),
         AGITATE(-7.5),
-        GROUND(-12);
+        
+        GROUND(-9.75);
 
         public final double position;
 

@@ -6,7 +6,6 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
@@ -45,31 +44,6 @@ public class Lintake extends SubsystemBase {
     public void setState(RollerState rollerState) {
         m_rollerState = rollerState;
     }
-
-    
-    public Command extend(){
-        return Commands.runOnce(()-> {
-        m_leaderPinionMotor.setVoltage(3.25);
-        m_followerPinionMotor.setVoltage(3.25); }
-        ).andThen(Commands.waitSeconds(.25)).andThen(Commands.runOnce(()->{
-            m_leaderPinionMotor.setVoltage(0); 
-            m_followerPinionMotor.setVoltage(0);
-            m_leaderPinionMotor.setPosition(-9.50);
-            m_followerPinionMotor.setPosition(-9.50);
-        
-        } 
-            ));
-    }
-      public Command retract(){
-        return Commands.runOnce(()-> {
-        m_leaderPinionMotor.setVoltage(-3.25);
-        m_followerPinionMotor.setVoltage(-3.25); }
-        ).andThen(Commands.waitSeconds(.2)).andThen(Commands.runOnce(()->{
-            m_leaderPinionMotor.setVoltage(0); 
-            m_followerPinionMotor.setVoltage(0);} 
-            ));
-    }
-    
 
     @Override
     public void periodic() {

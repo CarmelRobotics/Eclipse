@@ -324,13 +324,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
-        if (DriverStation.isAutonomous()) {
-            m_field.setRobotPose(getState().Pose);
-            SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
-            return;
-        }
-        
-        for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
+    boolean hubVisible = false;
+    for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
             LimelightHelpers.SetRobotOrientation(
                     limelight.name(), getState().Pose.getRotation().getDegrees(), 
                     getPigeon2().getAngularVelocityZWorld().getValueAsDouble(), 
@@ -343,6 +338,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 continue;
             }
             if (estimate.tagCount > 0) {
+                hubVisible = true;
                 double poseDelta = estimate.pose.getTranslation().getDistance(getState().Pose.getTranslation());
                 if (poseDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
                     m_rejectedVisionMeasurements++;
@@ -361,15 +357,107 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         }
 
         m_field.setRobotPose(getState().Pose);
-
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
-        SmartDashboard.putNumber("shot distance", getShotDistance());
-        SmartDashboard.putNumber("shot compensated heading deg", getHubHeading().getDegrees());
-        SmartDashboard.putNumber("shot heading error deg", getHubHeadingError().getDegrees());
-        SmartDashboard.putNumber("shot compensated vector x", getMotionCompensatedShotVector().getX());
-        SmartDashboard.putNumber("shot compensated vector y", getMotionCompensatedShotVector().getY());
-        SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);
+        SmartDashboard.putBoolean("hub active", hubVisible);
+        // Publish which alliance's hub is currently active per 2026 Game Data logic
+        double matchTime = DriverStation.getMatchTime();
+        String gameData = DriverStation.getGameSpecificMessage();
+
+        boolean ourHubActive = computeOurHubActive(matchTime, gameData);
+        SmartDashboard.putBoolean("our hub active", ourHubActive);
+
+        // Compute which alliance currently has active hub (Blue or Red)
+        boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
+        String activeAlliance = blueHubActive ? "Blue" : "Red";
+        SmartDashboard.putString("active hub alliance", activeAlliance);
     }
+
+    private boolean computeOurHubActive(double matchTime, String gameData) {
+        Optional<Alliance> alliance = DriverStation.getAlliance();
+        if (alliance.isEmpty()) {
+            return false;
+        }
+        if (DriverStation.isAutonomous()) {
+            return true;
+        }
+        if (!DriverStation.isTeleop()) {
+            return false;
+        }
+
+        // If no game data yet, assume hub active (per WPILib guidance)
+        if (gameData == null || gameData.isEmpty()) {
+            return true;
+        }
+
+        boolean redInactiveFirst;
+        switch (gameData.charAt(0)) {
+            case 'R' -> redInactiveFirst = true;
+            case 'B' -> redInactiveFirst = false;
+            default -> {
+                return true;
+            }
+        }
+
+        boolean shift1Active = switch (alliance.get()) {
+            case Red -> !redInactiveFirst;
+            case Blue -> redInactiveFirst;
+        };
+
+        if (matchTime > 130) {
+            return true;
+        } else if (matchTime > 105) {
+            return shift1Active;
+        } else if (matchTime > 80) {
+            return !shift1Active;
+        } else if (matchTime > 55) {
+            return shift1Active;
+        } else if (matchTime > 30) {
+            return !shift1Active;
+        } else {
+            return true;
+        }
+    }
+
+    private boolean computeHubActiveForAlliance(Alliance alliance, double matchTime, String gameData) {
+        // Same logic as computeOurHubActive but for the specified alliance
+        if (DriverStation.isAutonomous()) {
+            return true;
+        }
+        if (!DriverStation.isTeleop()) {
+            return false;
+        }
+        if (gameData == null || gameData.isEmpty()) {
+            return true;
+        }
+        boolean redInactiveFirst;
+        switch (gameData.charAt(0)) {
+            case 'R' -> redInactiveFirst = true;
+            case 'B' -> redInactiveFirst = false;
+            default -> {
+                return true;
+            }
+        }
+
+        boolean shift1Active = switch (alliance) {
+            case Red -> !redInactiveFirst;
+            case Blue -> redInactiveFirst;
+        };
+
+        if (matchTime > 130) {
+            return true;
+        } else if (matchTime > 105) {
+            return shift1Active;
+        } else if (matchTime > 80) {
+            return !shift1Active;
+        } else if (matchTime > 55) {
+            return shift1Active;
+        } else if (matchTime > 30) {
+            return !shift1Active;
+        } else {
+            return true;
+        }
+    }
+    
 
     private void startSimThread() {
         m_lastSimTime = Utils.getCurrentTimeSeconds();
@@ -398,7 +486,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         super.addVisionMeasurement(visionRobotPoseMeters, Utils.fpgaToCurrentTime(timestampSeconds));
     }
     public Command setPose(Pose2d pose) {
-       return run(() -> this.getState().Pose = pose);
+       return runOnce(() -> this.resetPose(pose));
     }
 
     public double getDistanceToClosestHub() {
@@ -443,7 +531,26 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public Rotation2d getHubHeading() {
         Rotation2d shotHeading = getMotionCompensatedShotVector().getAngle();
-        return shotHeading.plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
+        // Compensate for robot rotation during ball time-of-flight
+        double timeOfFlight = getShotTimeOfFlightSeconds();
+        // Angular velocity in radians/sec (world Z). Use pigeon/gyro reading available via getPigeon2()
+        double angularRateRadPerSec = 0.0;
+        try {
+            angularRateRadPerSec = getPigeon2().getAngularVelocityZWorld().getValueAsDouble();
+        } catch (Exception ex) {
+            // If gyro not available for any reason, fall back to zero compensation
+            angularRateRadPerSec = 0.0;
+        }
+
+        double rotationalCompensation = angularRateRadPerSec * timeOfFlight;
+        // Allow tuning via SmartDashboard (default ~0.35 rad = ~20°)
+        double maxComp = SmartDashboard.getNumber("ShotTuning/MaxRotationalCompRad", 0.35);
+        rotationalCompensation = Math.max(-maxComp, Math.min(maxComp, rotationalCompensation));
+
+        Rotation2d compensatedHeading = shotHeading.plus(Rotation2d.fromRadians(rotationalCompensation));
+        // Publish the compensation applied in degrees for debugging
+        SmartDashboard.putNumber("rotational compensation deg", Math.toDegrees(rotationalCompensation));
+        return compensatedHeading.plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
     }
 
     public Rotation2d getHubHeadingError() {

@@ -34,6 +34,16 @@ public final class ShooterConstants {
     public static final double kLobShooterRps = 40;
     public static final double kSendShooterRps = 90;
     public static final double kStowPivotPosition = 0;
+    // Approx 180 degrees of pivot motion (in rotations). Assumption: 0.5 rotations ~= 180°
+    public static final double kShotBlockPivotPosition = 0.5;
+    // Gear ratio: motor rotations per output (pivot) rotation
+    public static final double kPivotGearRatio = 42.0;
+    // SmartDashboard keys for runtime tuning
+    public static final String kShotBlockPivotPositionKey = "ShotTuning/ShotBlockPivotPosition";
+    public static final String kPivotCurrentLimitKey = "ShotTuning/PivotCurrentLimitA";
+    public static final String kPivotCurrentTimeoutKey = "ShotTuning/PivotCurrentTimeoutS";
+    public static final String kIndexerCurrentLimitKey = "ShotTuning/IndexerCurrentLimitA";
+    public static final String kIndexerCurrentTimeoutKey = "ShotTuning/IndexerCurrentTimeoutS";
     public static final double kIndexerScoreVolts = -4.5;
     public static final double kShooterHeadingOffsetRadians = Units.degreesToRadians(0);
     public static final double kShooterReadyToleranceRps = 3.0;
@@ -52,20 +62,29 @@ public final class ShooterConstants {
     private static final InterpolatingDoubleTreeMap ShotTimeOfFlightSecondsByDistance = new InterpolatingDoubleTreeMap();
 
     static {
-        ScorePivotPositionByDistance.put(1.5, 0.0);
-        ScorePivotPositionByDistance.put(2.5, 0.0);
-        ScorePivotPositionByDistance.put(3.5, 0.0);
-        ScorePivotPositionByDistance.put(4.5, 0.0);
+        // Minimum-energy lob solution for a top-drop hub whose opening lip is 72" off
+        // the carpet, with the shooter releasing at ~12" (Delta-h = 1.524 m). For each
+        // distance the least-speed trajectory is used: it gives the steepest descent
+        // into the horizontal opening, and its launch angle stays within the pivot's
+        // ~25-30 deg range. Pivot positions are output rotations from stow (the 1.5 m
+        // shot IS the stow-position lob at ~67.7 deg); farther shots flatten the arc.
+        // theta = 45 + 0.5*atan(dh/d); v^2 = g*(dh + hypot(d, dh)); rps = 4.177*v_ball.
+        // These are vacuum values (no drag) and bias ~5-10% low; trim globally on the
+        // field with the ShotTuning/ShooterRpsOffset dashboard key.
+        ScorePivotPositionByDistance.put(1.5, 0.000);
+        ScorePivotPositionByDistance.put(2.5, 0.019);
+        ScorePivotPositionByDistance.put(3.5, 0.030);
+        ScorePivotPositionByDistance.put(4.5, 0.037);
 
-        ScoreShooterRpsByDistance.put(1.5, 47.0);
-        ScoreShooterRpsByDistance.put(2.5, 47.0);
-        ScoreShooterRpsByDistance.put(3.5, 47.0);
-        ScoreShooterRpsByDistance.put(4.5, 47.0);
+        ScoreShooterRpsByDistance.put(1.5, 25.0);
+        ScoreShooterRpsByDistance.put(2.5, 27.6);
+        ScoreShooterRpsByDistance.put(3.5, 30.2);
+        ScoreShooterRpsByDistance.put(4.5, 32.8);
 
-        ShotTimeOfFlightSecondsByDistance.put(1.5, 0.18);
-        ShotTimeOfFlightSecondsByDistance.put(2.5, 0.24);
-        ShotTimeOfFlightSecondsByDistance.put(3.5, 0.30);
-        ShotTimeOfFlightSecondsByDistance.put(4.5, 0.36);
+        ShotTimeOfFlightSecondsByDistance.put(1.5, 0.66);
+        ShotTimeOfFlightSecondsByDistance.put(2.5, 0.77);
+        ShotTimeOfFlightSecondsByDistance.put(3.5, 0.88);
+        ShotTimeOfFlightSecondsByDistance.put(4.5, 0.99);
     }
 
     public static double getScorePivotPosition(double distanceMeters) {
@@ -142,7 +161,8 @@ public final class ShooterConstants {
     public enum PivotState {
         STOW,
         SCORE,
-        LOB;
+        LOB,
+        SHOT_BLOCK;
     }
 
     public enum ShooterState {

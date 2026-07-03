@@ -10,12 +10,15 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.drive.TunerConstants;
 import frc.robot.subsystems.lintake.Lintake;
@@ -38,6 +41,21 @@ public class RobotContainer {
       .withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
       .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
+  // Shared snap request for trench heading lock.
+  // Reused every loop to avoid allocations; PID configured once in configureBindings().
+  private final SwerveRequest.FieldCentricFacingAngle trenchSnapRequest =
+      new SwerveRequest.FieldCentricFacingAngle();
+
+  // Trench snap hysteresis
+  private Rotation2d m_trenchLockHeading = null;
+  private static final double kTrenchHysteresisDegrees = 30.0; // changeable if desired
+
+  // Trench Y-coordinate bounds (blue-origin field coordinates).
+  // Left trench wall is at ~7.62m, right trench wall is at ~0.38m.
+  // The 0.3m buffer means the lock engages just before the robot is fully inside.
+  private static final double LEFT_TRENCH_Y_MIN  = 7.3;
+  private static final double RIGHT_TRENCH_Y_MAX = 0.7;
+
   private final SendableChooser<Command> autoSelection;
 
   public RobotContainer() {
@@ -55,6 +73,7 @@ public class RobotContainer {
     NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
     NamedCommands.registerCommand("intake retract", m_lintake.setState(PinionState.STOW));
     NamedCommands.registerCommand("intake run", Commands.runOnce(() -> m_lintake.setState(RollerState.INTAKE)));
+    NamedCommands.registerCommand("intake stop", Commands.runOnce(() -> m_lintake.setState(RollerState.ZERO)));
     NamedCommands.registerCommand("shoot", timedShotCommand(PivotState.SCORE, ShooterState.SCORE, 1.5));
     NamedCommands.registerCommand("stopshoot", stopShooterCommand());
   }
@@ -74,6 +93,63 @@ public class RobotContainer {
         m_drivetrain.applyRequest(() -> idle).ignoringDisable(true)
     );
 
+    // --- Trench heading lock ---
+    // Configure the heading PID once here. Same gains as faceHubCommand.
+    trenchSnapRequest.HeadingController.setP(8.0);
+    trenchSnapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
+
+    // True when the robot's Y coordinate is inside either trench zone.
+    Trigger inTrench = new Trigger(() -> {
+      double y = m_drivetrain.getState().Pose.getY();
+      return y >= LEFT_TRENCH_Y_MIN || y <= RIGHT_TRENCH_Y_MAX;
+    });
+
+    // While in the trench:
+    //   - lock heading to 180° (blue) / 0° (red) so intake faces into the trench
+    //   - stow the shooter pivot so it doesn't clip the trench bar
+    //   - deploy the lintake to GROUND so the driver can just drive through and pick up
+    // onFalse undoes the mechanical actions when the robot exits.
+    inTrench.whileTrue(
+        Commands.parallel(
+            // Drive with heading locked to trench angle; driver still controls translation.
+            m_drivetrain.applyRequest(() -> {
+        // Snap to whichever heading (0° or 180°) the robot is currently closer to.
+        Rotation2d currentRot = m_drivetrain.getState().Pose.getRotation();
+        Rotation2d target0 = Rotation2d.fromDegrees(0);
+        Rotation2d target180 = Rotation2d.fromDegrees(180);
+              double diff0 = Math.abs(MathUtil.angleModulus(currentRot.minus(target0).getRadians()));
+              double diff180 = Math.abs(MathUtil.angleModulus(currentRot.minus(target180).getRadians()));
+              Rotation2d nearest = diff0 <= diff180 ? target0 : target180;
+              double hystRad = Math.toRadians(kTrenchHysteresisDegrees);
+              if (m_trenchLockHeading == null) {
+                m_trenchLockHeading = nearest;
+              } else {
+                // Only flip if the nearest heading is sufficiently farther from the current lock
+                double distToCurrent = Math.abs(MathUtil.angleModulus(currentRot.minus(m_trenchLockHeading).getRadians()));
+                if (nearest != m_trenchLockHeading && distToCurrent > hystRad) {
+                  m_trenchLockHeading = nearest;
+                }
+              }
+              Rotation2d lockHeading = m_trenchLockHeading;
+              return trenchSnapRequest
+                  .withVelocityX(driverXVelocity())
+                  .withVelocityY(driverYVelocity())
+                  .withDeadband(Constants.kMaxSpeed * 0.1)
+                  .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
+                  .withTargetDirection(lockHeading);
+            }),
+            // Stow shooter so it clears the trench bar
+            Commands.runOnce(() -> m_shooter.setState(PivotState.STOW), m_shooter),
+            // Deploy lintake to ground for immediate intaking as you drive through
+            m_lintake.setState(PinionState.GROUND)
+        )
+    );
+
+    // When exiting the trench, stow the lintake back.
+    // Shooter stays stowed — driver can re-spin it with rightTrigger as normal.
+    inTrench.onFalse(m_lintake.setState(PinionState.STOW));
+
+    // --- Standard driver bindings (unchanged) ---
     m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
     m_controller.leftBumper().onTrue(m_lintake.setState(PinionState.GROUND));
     m_controller.rightBumper().onTrue(m_lintake.setState(PinionState.STOW));
@@ -95,6 +171,20 @@ public class RobotContainer {
             heldShotCommand(PivotState.SCORE, ShooterState.SCORE)
         )
     );
+  // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
+  m_controller.y().whileTrue(
+    Commands.runEnd(
+      () -> {
+        m_shooter.setState(PivotState.SHOT_BLOCK);
+        m_lintake.setState(PinionState.STOW);
+      },
+      () -> {
+        m_shooter.setState(PivotState.STOW);
+        m_lintake.setState(PinionState.STOW);
+      },
+      m_shooter, m_lintake
+    )
+  );
     m_controller.povUp().whileTrue(
         heldShotCommand(PivotState.LOB, ShooterState.LOB)
     );
@@ -115,24 +205,16 @@ public class RobotContainer {
     return Commands.sequence(
         prepareShotCommand(pivotState, shooterState),
         Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-        Commands.runEnd(
-            this::feedIfReady,
-            this::stopShooter,
-            m_shooter
-        ).withTimeout(feedSeconds)
-    );
+        Commands.run(this::feedIfReady, m_shooter).withTimeout(feedSeconds)
+    ).finallyDo(interrupted -> stopShooter());
   }
 
   private Command heldShotCommand(PivotState pivotState, ShooterState shooterState) {
     return Commands.sequence(
         prepareShotCommand(pivotState, shooterState),
         Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-        Commands.runEnd(
-            this::feedIfReady,
-            this::stopShooter,
-            m_shooter
-        )
-    );
+        Commands.run(this::feedIfReady, m_shooter)
+    ).finallyDo(interrupted -> stopShooter());
   }
 
   private Command prepareShotCommand(PivotState pivotState, ShooterState shooterState) {

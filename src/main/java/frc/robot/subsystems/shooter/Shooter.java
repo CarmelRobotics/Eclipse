@@ -6,7 +6,6 @@ import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 
-import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -35,6 +34,9 @@ public class Shooter extends SubsystemBase {
     private IndexerState m_indexerState = IndexerState.ZERO;
     private double m_targetPivotPosition = ShooterConstants.kStowPivotPosition;
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
+    // Overcurrent protection trackers
+    private double m_pivotOvercurrentStartTime = 0;
+    private double m_indexerOvercurrentStartTime = 0;
 
     private final CommandSwerveDrivetrain m_drive;
 
@@ -43,6 +45,12 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
         SmartDashboard.putNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
         SmartDashboard.putNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
+    // Tunables for frame-clear position and current limits
+    SmartDashboard.putNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
+    SmartDashboard.putNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
+    SmartDashboard.putNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
+    SmartDashboard.putNumber(ShooterConstants.kIndexerCurrentLimitKey, 25.0);
+    SmartDashboard.putNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
 
         m_indexerMotor.getConfigurator().apply(ShooterConstants.IndexerConfig);
 
@@ -111,8 +119,17 @@ public class Shooter extends SubsystemBase {
         boolean aimed = Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
         boolean shooterReady = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetShooterRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
-        boolean pivotReady = Math.abs(m_leaderPivotMotor.getPosition().getValueAsDouble() - m_targetPivotPosition)
+        // Convert motor position to output (pivot) rotations using gear ratio
+        double currentPivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        boolean pivotReady = Math.abs(currentPivotOutputRot - m_targetPivotPosition)
             <= ShooterConstants.kPivotReadyToleranceRotations;
+
+        // Published individually so a stuck shot can be diagnosed from the dashboard
+        // instead of just seeing the combined "ready to shoot" go false.
+        SmartDashboard.putBoolean("ready/shot in range", shotInRange);
+        SmartDashboard.putBoolean("ready/aimed", aimed);
+        SmartDashboard.putBoolean("ready/shooter at speed", shooterReady);
+        SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
 
         return shotInRange && aimed && shooterReady && pivotReady;
     }
@@ -133,9 +150,10 @@ public class Shooter extends SubsystemBase {
         */
 
         double shotDistance = m_drive.getShotDistance();
-        double pivotOffset = SmartDashboard.getNumber(ShooterConstants.kPivotOffsetKey, 0);
+    double pivotOffset = SmartDashboard.getNumber(ShooterConstants.kPivotOffsetKey, 0);
         double shooterRpsOffset = SmartDashboard.getNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
-        m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + pivotOffset;
+    m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + pivotOffset;
+    // Allow frame-clear to be tuned on dashboard
         m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + shooterRpsOffset;
 
         SmartDashboard.putNumber("shot compensated distance", shotDistance);
@@ -148,16 +166,21 @@ public class Shooter extends SubsystemBase {
         switch (m_pivotState) {
             
             case STOW -> {
-                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(ShooterConstants.kStowPivotPosition));
-                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(ShooterConstants.kStowPivotPosition));
+                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(ShooterConstants.kStowPivotPosition * ShooterConstants.kPivotGearRatio));
+                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(ShooterConstants.kStowPivotPosition * ShooterConstants.kPivotGearRatio));
             }
             case SCORE -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(m_targetPivotPosition));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(m_targetPivotPosition));
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(m_targetPivotPosition * ShooterConstants.kPivotGearRatio));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(m_targetPivotPosition * ShooterConstants.kPivotGearRatio));
             }
             case LOB -> {
                 // m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0.45));
                 // m_followerPivotMotor.setControl(m_positionRequest.withPosition(0.45));
+            }
+            case SHOT_BLOCK -> {
+                double framePos = SmartDashboard.getNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
+                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(framePos * ShooterConstants.kPivotGearRatio));
+                m_followerPivotMotor.setControl(m_positionRequest.withPosition(framePos * ShooterConstants.kPivotGearRatio));
             }
         }
         
@@ -178,9 +201,43 @@ public class Shooter extends SubsystemBase {
             
         }
         
-        m_indexerMotor.setVoltage(m_indexerState.volts);
-        SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
-        SmartDashboard.putNumber("shooter position", m_leaderPivotMotor.getPosition().getValueAsDouble());
+    m_indexerMotor.setVoltage(m_indexerState.volts);
+    SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
+    // Publish pivot position in output (pivot) rotations for clarity
+    double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+    SmartDashboard.putNumber("shooter position", pivotOutputRot);
+        // Overcurrent checks (simple): pivot and indexer
+        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        double pivotCurrent = Math.max(m_leaderPivotMotor.getSupplyCurrent().getValueAsDouble(), m_followerPivotMotor.getSupplyCurrent().getValueAsDouble());
+        double pivotLimit = SmartDashboard.getNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
+        double pivotTimeout = SmartDashboard.getNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
+        if (pivotCurrent > pivotLimit) {
+            if (m_pivotOvercurrentStartTime == 0) m_pivotOvercurrentStartTime = now;
+            else if (now - m_pivotOvercurrentStartTime > pivotTimeout) {
+                // trip: stop pivot and stow
+                m_leaderPivotMotor.setVoltage(0);
+                m_followerPivotMotor.setVoltage(0);
+                m_pivotState = PivotState.STOW;
+                SmartDashboard.putBoolean("pivot overcurrent tripped", true);
+            }
+        } else {
+            m_pivotOvercurrentStartTime = 0;
+        }
+
+        double indexerCurrent = m_indexerMotor.getSupplyCurrent().getValueAsDouble();
+        double indexerLimit = SmartDashboard.getNumber(ShooterConstants.kIndexerCurrentLimitKey, 25.0);
+        double indexerTimeout = SmartDashboard.getNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
+        if (indexerCurrent > indexerLimit) {
+            if (m_indexerOvercurrentStartTime == 0) m_indexerOvercurrentStartTime = now;
+            else if (now - m_indexerOvercurrentStartTime > indexerTimeout) {
+                // stop feeding
+                m_indexerMotor.setVoltage(0);
+                m_indexerState = IndexerState.ZERO;
+                SmartDashboard.putBoolean("indexer overcurrent tripped", true);
+            }
+        } else {
+            m_indexerOvercurrentStartTime = 0;
+        }
         SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
         SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
     }
