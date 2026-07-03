@@ -19,6 +19,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.drive.TunerConstants;
 import frc.robot.subsystems.lintake.Lintake;
@@ -66,6 +67,21 @@ public class RobotContainer {
     SmartDashboard.putData("Auto", autoSelection);
 
     configureBindings();
+    configureSysIdButtons();
+  }
+
+  // Flywheel SysId as clickable dashboard buttons (no controller conflict). Run each
+  // with the robot enabled in Test mode, shooter clamped and empty, then analyze the
+  // resulting .hoot in Tuner X to get kS/kV/kA for the ShooterConfigs.
+  private void configureSysIdButtons() {
+    SmartDashboard.putData("SysId/Shooter Quasistatic Fwd",
+        m_shooter.sysIdQuasistatic(SysIdRoutine.Direction.kForward));
+    SmartDashboard.putData("SysId/Shooter Quasistatic Rev",
+        m_shooter.sysIdQuasistatic(SysIdRoutine.Direction.kReverse));
+    SmartDashboard.putData("SysId/Shooter Dynamic Fwd",
+        m_shooter.sysIdDynamic(SysIdRoutine.Direction.kForward));
+    SmartDashboard.putData("SysId/Shooter Dynamic Rev",
+        m_shooter.sysIdDynamic(SysIdRoutine.Direction.kReverse));
   }
 
   private void registerNamedCommands() {
@@ -201,11 +217,15 @@ public class RobotContainer {
     );
   }
 
+  // Shot sequence: aim/spin up, wait until readyToShoot() OR the spinup timeout
+  // expires, then feed. The waitUntil completes on whichever comes first, so if the
+  // shot never satisfies every readiness gate it force-feeds after
+  // kShotSpinupTimeoutSeconds rather than hanging with the flywheel spinning forever.
   private Command timedShotCommand(PivotState pivotState, ShooterState shooterState, double feedSeconds) {
     return Commands.sequence(
         prepareShotCommand(pivotState, shooterState),
         Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-        Commands.run(this::feedIfReady, m_shooter).withTimeout(feedSeconds)
+        Commands.run(this::feed, m_shooter).withTimeout(feedSeconds)
     ).finallyDo(interrupted -> stopShooter());
   }
 
@@ -213,7 +233,7 @@ public class RobotContainer {
     return Commands.sequence(
         prepareShotCommand(pivotState, shooterState),
         Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-        Commands.run(this::feedIfReady, m_shooter)
+        Commands.run(this::feed, m_shooter)
     ).finallyDo(interrupted -> stopShooter());
   }
 
@@ -234,8 +254,10 @@ public class RobotContainer {
     m_shooter.setState(PivotState.STOW);
   }
 
-  private void feedIfReady() {
-    m_shooter.setState(m_shooter.readyToShoot() ? IndexerState.SCORE : IndexerState.ZERO);
+  // Unconditionally run the indexer. Only reached after the readyToShoot()/timeout
+  // wait, so this is where the "shoot anyway after the timeout" behavior happens.
+  private void feed() {
+    m_shooter.setState(IndexerState.SCORE);
   }
 
   private double driverXVelocity() {

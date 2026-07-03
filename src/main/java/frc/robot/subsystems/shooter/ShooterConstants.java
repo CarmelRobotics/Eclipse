@@ -1,5 +1,6 @@
 package frc.robot.subsystems.shooter;
 
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
@@ -66,15 +67,21 @@ public final class ShooterConstants {
         // the carpet, with the shooter releasing at ~12" (Delta-h = 1.524 m). For each
         // distance the least-speed trajectory is used: it gives the steepest descent
         // into the horizontal opening, and its launch angle stays within the pivot's
-        // ~25-30 deg range. Pivot positions are output rotations from stow (the 1.5 m
-        // shot IS the stow-position lob at ~67.7 deg); farther shots flatten the arc.
+        // ~25-30 deg range. Farther shots flatten the arc.
         // theta = 45 + 0.5*atan(dh/d); v^2 = g*(dh + hypot(d, dh)); rps = 4.177*v_ball.
-        // These are vacuum values (no drag) and bias ~5-10% low; trim globally on the
+        //
+        // Pivot positions are output rotations. The relative spacing between distances
+        // comes from the min-energy launch angles; the whole curve is then offset up by
+        // a ~3 deg (0.008 rot) floor because at dead stow the shooter rests ON the kicker
+        // wheels and they cannot spin to feed until the pivot lifts clear. So the closest
+        // shot sits at the floor, not at 0. The floor is approximate -- confirm the true
+        // kicker-clearance angle on the field.
+        // These RPS are vacuum values (no drag) and bias ~5-10% low; trim globally on the
         // field with the ShotTuning/ShooterRpsOffset dashboard key.
-        ScorePivotPositionByDistance.put(1.5, 0.000);
-        ScorePivotPositionByDistance.put(2.5, 0.019);
-        ScorePivotPositionByDistance.put(3.5, 0.030);
-        ScorePivotPositionByDistance.put(4.5, 0.037);
+        ScorePivotPositionByDistance.put(1.5, 0.008);
+        ScorePivotPositionByDistance.put(2.5, 0.027);
+        ScorePivotPositionByDistance.put(3.5, 0.038);
+        ScorePivotPositionByDistance.put(4.5, 0.045);
 
         ScoreShooterRpsByDistance.put(1.5, 25.0);
         ScoreShooterRpsByDistance.put(2.5, 27.6);
@@ -122,14 +129,28 @@ public final class ShooterConstants {
     }
 
     private static final class ShooterConfigs {
-        private static final double kS = 0;
+        // kS was 0, which is physically wrong (every motor needs some static term to
+        // overcome friction). 0.15 is a conservative starting estimate -- run SysId to
+        // ground kS/kV/kA in real data. kP raised 0.125 -> 0.3 to fight the velocity dip
+        // when a ball passes through harder; tune it up toward the edge of oscillation
+        // using the DogLog Shooter/RpsError trace. kD intentionally left 0: on a velocity
+        // loop it differentiates an already-noisy signal and usually hurts more than helps.
+        private static final double kS = 0.15;
         private static final double kV = .125;
-        private static final double kP = .125;
+        private static final double kP = .3;
         private static final double kI = 0;
         private static final double kD = 0;
 
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
             .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS).withKA(.2);
+
+        // Supply limit protects the bus voltage (and the main breaker) during the shot
+        // current spike -- this is what most directly helps VelocityVoltage hold speed,
+        // since it keeps battery sag from eating the voltage command. Stator limit is
+        // kept generous so recovery torque is never the bottleneck.
+        private static final CurrentLimitsConfigs CurrentLimits = new CurrentLimitsConfigs()
+            .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(50)
+            .withStatorCurrentLimitEnable(true).withStatorCurrentLimit(100);
     }
 
     private static final class IndexerConfigs {
@@ -152,9 +173,11 @@ public final class ShooterConstants {
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
     public static final TalonFXConfiguration LeftShooterConfig = new TalonFXConfiguration()
-        .withSlot0(ShooterConfigs.Slot0Configs).withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
+        .withSlot0(ShooterConfigs.Slot0Configs).withCurrentLimits(ShooterConfigs.CurrentLimits)
+        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
     public static final TalonFXConfiguration RightShooterConfig = new TalonFXConfiguration()
-        .withSlot0(ShooterConfigs.Slot0Configs).withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
+        .withSlot0(ShooterConfigs.Slot0Configs).withCurrentLimits(ShooterConfigs.CurrentLimits)
+        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
     public static final TalonFXConfiguration IndexerConfig = new TalonFXConfiguration().withSlot0(IndexerConfigs.Slot0Configs);
 

@@ -1,15 +1,21 @@
 package frc.robot.subsystems.shooter;
 
+import static edu.wpi.first.units.Units.Volts;
+
+import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 
+import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
@@ -28,6 +34,32 @@ public class Shooter extends SubsystemBase {
 
     private final VelocityVoltage m_velocityRequest = new VelocityVoltage(0);
     private final MotionMagicVoltage m_positionRequest = new MotionMagicVoltage(0);
+
+    // SysId (flywheel characterization). While true, periodic() stops commanding the
+    // flywheel so the routine's voltage ramp isn't overwritten every loop.
+    private boolean m_characterizing = false;
+    private final VoltageOut m_sysIdVoltage = new VoltageOut(0);
+    private final SysIdRoutine m_sysIdRoutine = new SysIdRoutine(
+        new SysIdRoutine.Config(
+            null,          // default ramp rate (1 V/s) for the quasistatic tests
+            Volts.of(7),   // dynamic step voltage
+            null,          // default timeout (10 s) -- lower it if the flywheel overspeeds
+            state -> SignalLogger.writeString("ShooterSysId_State", state.toString())
+        ),
+        new SysIdRoutine.Mechanism(
+            output -> {
+                // Drive all four flywheel motors together, exactly as normal operation
+                // does, so the characterized gains apply to the whole system.
+                double volts = output.in(Volts);
+                m_leftLeaderShooterMotor.setControl(m_sysIdVoltage.withOutput(volts));
+                m_backLeftFollowerShooterMotor.setControl(m_sysIdVoltage.withOutput(volts));
+                m_rightFollowerShooterMotor.setControl(m_sysIdVoltage.withOutput(volts));
+                m_backRightFollowerShooterMotor.setControl(m_sysIdVoltage.withOutput(volts));
+            },
+            null, // SignalLogger captures the TalonFX signals; no manual logging needed
+            this
+        )
+    );
 
     private PivotState m_pivotState = PivotState.STOW;
     private ShooterState m_shooterState = ShooterState.ZERO;
@@ -131,6 +163,11 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putBoolean("ready/shooter at speed", shooterReady);
         SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
 
+        DogLog.log("Shooter/Ready/ShotInRange", shotInRange);
+        DogLog.log("Shooter/Ready/Aimed", aimed);
+        DogLog.log("Shooter/Ready/ShooterAtSpeed", shooterReady);
+        DogLog.log("Shooter/Ready/PivotInPosition", pivotReady);
+
         return shotInRange && aimed && shooterReady && pivotReady;
     }
 
@@ -185,20 +222,22 @@ public class Shooter extends SubsystemBase {
         }
         
 
-        switch (m_shooterState) {
-            case ZERO -> {
-                setShooterVelocity(ShooterConstants.kIdleShooterRps);
+        // Skip normal flywheel control while a SysId routine owns the motors.
+        if (!m_characterizing) {
+            switch (m_shooterState) {
+                case ZERO -> {
+                    setShooterVelocity(ShooterConstants.kIdleShooterRps);
+                }
+                case SCORE -> {
+                    setShooterVelocity(m_targetShooterRps);
+                }
+                case LOB -> {
+                    setShooterVelocity(ShooterConstants.kLobShooterRps);
+                }
+                case SEND ->{
+                    setShooterVelocity(ShooterConstants.kSendShooterRps);
+                }
             }
-            case SCORE -> {
-                setShooterVelocity(m_targetShooterRps);
-            }
-             case LOB -> {
-                setShooterVelocity(ShooterConstants.kLobShooterRps);
-            }
-            case SEND ->{
-                setShooterVelocity(ShooterConstants.kSendShooterRps);
-            }
-            
         }
         
     m_indexerMotor.setVoltage(m_indexerState.volts);
@@ -240,6 +279,23 @@ public class Shooter extends SubsystemBase {
         }
         SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
         SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
+
+        // --- DogLog shot-tuning telemetry (persisted to WPILOG + live on NetworkTables) ---
+        double actualRps = m_leftLeaderShooterMotor.getVelocity().getValueAsDouble();
+        DogLog.log("Shooter/ShotDistanceM", shotDistance);
+        DogLog.log("Shooter/HubHeadingErrorDeg", m_drive.getHubHeadingError().getDegrees());
+        DogLog.log("Shooter/TargetPivotRot", m_targetPivotPosition);
+        DogLog.log("Shooter/ActualPivotRot", pivotOutputRot);
+        DogLog.log("Shooter/TargetRps", m_targetShooterRps);
+        DogLog.log("Shooter/ActualRps", actualRps);
+        DogLog.log("Shooter/RpsError", m_targetShooterRps - actualRps);
+        DogLog.log("Shooter/ReadyToShoot", readyToShoot());
+        DogLog.log("Shooter/AvgCurrentA", getAvgShooterCurrentDraw());
+        DogLog.log("Shooter/IndexerCurrentA", indexerCurrent);
+        DogLog.log("Shooter/IndexerVolts", m_indexerState.volts);
+        DogLog.log("Shooter/PivotState", m_pivotState.toString());
+        DogLog.log("Shooter/ShooterState", m_shooterState.toString());
+        DogLog.log("Shooter/IndexerState", m_indexerState.toString());
     }
 
     private void setShooterVelocity(double velocityRps) {
@@ -247,5 +303,32 @@ public class Shooter extends SubsystemBase {
         m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(velocityRps));
         m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(velocityRps));
         m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(velocityRps));
+    }
+
+    private void stopShooterMotors() {
+        m_leftLeaderShooterMotor.stopMotor();
+        m_backLeftFollowerShooterMotor.stopMotor();
+        m_rightFollowerShooterMotor.stopMotor();
+        m_backRightFollowerShooterMotor.stopMotor();
+    }
+
+    /**
+     * Flywheel SysId characterization commands. Each starts the CTRE SignalLogger, hands
+     * the flywheel motors to the routine, and on end stops the log and the motors and
+     * releases control back to periodic(). Run all four (quasistatic forward/reverse,
+     * dynamic forward/reverse) with the shooter clamped and empty, then analyze the .hoot
+     * in Tuner X (Simple/flywheel mechanism) to get kS, kV, kA. Keep the analysis in
+     * rotations to match the Phoenix6 Slot0 units.
+     */
+    public Command sysIdQuasistatic(SysIdRoutine.Direction direction) {
+        return m_sysIdRoutine.quasistatic(direction)
+            .beforeStarting(() -> { m_characterizing = true; SignalLogger.start(); })
+            .finallyDo(() -> { stopShooterMotors(); SignalLogger.stop(); m_characterizing = false; });
+    }
+
+    public Command sysIdDynamic(SysIdRoutine.Direction direction) {
+        return m_sysIdRoutine.dynamic(direction)
+            .beforeStarting(() -> { m_characterizing = true; SignalLogger.start(); })
+            .finallyDo(() -> { stopShooterMotors(); SignalLogger.stop(); m_characterizing = false; });
     }
 }
