@@ -32,7 +32,6 @@ public class Lintake extends SubsystemBase {
         m_followerPinionMotor.setNeutralMode(NeutralModeValue.Brake);
 
         m_rollerMotor.setNeutralMode(NeutralModeValue.Coast);
-        //m_followerPinionMotor.setControl(new Follower(m_leaderPinionMotor.getDeviceID(), MotorAlignmentValue.Opposed));
     }
 
     public Command setState(PinionState pinionState) {
@@ -51,11 +50,10 @@ public class Lintake extends SubsystemBase {
 
     @Override
     public void periodic() {
-        m_rollerMotor.setVoltage(m_rollerState.velocity);
+        m_rollerMotor.setVoltage(m_rollerState.volts);
 
         m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-         m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-       // m_followerPinionMotor.setVoltage(m_leaderPinionMotor.getMotorVoltage().getValueAsDouble());
+        m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
 
         SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());

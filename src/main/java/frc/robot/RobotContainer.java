@@ -129,10 +129,10 @@ public class RobotContainer {
         Commands.parallel(
             // Drive with heading locked to trench angle; driver still controls translation.
             m_drivetrain.applyRequest(() -> {
-        // Snap to whichever heading (0° or 180°) the robot is currently closer to.
-        Rotation2d currentRot = m_drivetrain.getState().Pose.getRotation();
-        Rotation2d target0 = Rotation2d.fromDegrees(0);
-        Rotation2d target180 = Rotation2d.fromDegrees(180);
+              // Snap to whichever heading (0° or 180°) the robot is currently closer to.
+              Rotation2d currentRot = m_drivetrain.getState().Pose.getRotation();
+              Rotation2d target0 = Rotation2d.fromDegrees(0);
+              Rotation2d target180 = Rotation2d.fromDegrees(180);
               double diff0 = Math.abs(MathUtil.angleModulus(currentRot.minus(target0).getRadians()));
               double diff180 = Math.abs(MathUtil.angleModulus(currentRot.minus(target180).getRadians()));
               Rotation2d nearest = diff0 <= diff180 ? target0 : target180;
@@ -146,13 +146,12 @@ public class RobotContainer {
                   m_trenchLockHeading = nearest;
                 }
               }
-              Rotation2d lockHeading = m_trenchLockHeading;
               return trenchSnapRequest
                   .withVelocityX(driverXVelocity())
                   .withVelocityY(driverYVelocity())
                   .withDeadband(Constants.kMaxSpeed * 0.1)
                   .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
-                  .withTargetDirection(lockHeading);
+                  .withTargetDirection(m_trenchLockHeading);
             }),
             // Stow shooter so it clears the trench bar
             Commands.runOnce(() -> m_shooter.setState(PivotState.STOW), m_shooter),
@@ -187,20 +186,20 @@ public class RobotContainer {
             heldShotCommand(PivotState.SCORE, ShooterState.SCORE)
         )
     );
-  // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
-  m_controller.y().whileTrue(
-    Commands.runEnd(
-      () -> {
-        m_shooter.setState(PivotState.SHOT_BLOCK);
-        m_lintake.setPinionState(PinionState.STOW);
-      },
-      () -> {
-        m_shooter.setState(PivotState.STOW);
-        m_lintake.setPinionState(PinionState.STOW);
-      },
-      m_shooter, m_lintake
-    )
-  );
+    // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
+    m_controller.y().whileTrue(
+        Commands.runEnd(
+            () -> {
+              m_shooter.setState(PivotState.SHOT_BLOCK);
+              m_lintake.setPinionState(PinionState.STOW);
+            },
+            () -> {
+              m_shooter.setState(PivotState.STOW);
+              m_lintake.setPinionState(PinionState.STOW);
+            },
+            m_shooter, m_lintake
+        )
+    );
     m_controller.povUp().whileTrue(
         heldShotCommand(PivotState.LOB, ShooterState.LOB)
     );

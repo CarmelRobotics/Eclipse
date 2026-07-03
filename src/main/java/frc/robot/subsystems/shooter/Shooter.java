@@ -4,12 +4,10 @@ import static edu.wpi.first.units.Units.Volts;
 
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
-import com.ctre.phoenix6.signals.MotorAlignmentValue;
 
 import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -116,13 +114,8 @@ public class Shooter extends SubsystemBase {
         m_rightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.RightShooterConfig);
         m_backRightFollowerShooterMotor.getConfigurator().apply(ShooterConstants.RightShooterConfig);
 
-        
-
-        //m_followerPivotMotor.setControl(new Follower(m_leaderPivotMotor.getDeviceID(), MotorAlignmentValue.Opposed));
-
-        m_backLeftFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Aligned));
-        m_rightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
-        m_backRightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
+        // All four flywheel motors are commanded directly in setShooterVelocity() (their
+        // configs carry the left/right inverts), so no Follower setup is needed here.
 
         // Keep the status signals we actually read alive at a useful rate BEFORE optimizing
         // the bus. optimizeBusUtilization() disables every signal not given a frequency, so
@@ -173,10 +166,12 @@ public class Shooter extends SubsystemBase {
         });
     }
 
-    public double getAvgShooterCurrentDraw(){
-        var sum = m_leftLeaderShooterMotor.getSupplyCurrent().getValueAsDouble() + m_backLeftFollowerShooterMotor.getSupplyCurrent().getValueAsDouble() + m_rightFollowerShooterMotor.getSupplyCurrent().getValueAsDouble() + m_backRightFollowerShooterMotor.getSupplyCurrent().getValueAsDouble();
+    public double getAvgShooterCurrentDraw() {
+        double sum = m_leftLeaderShooterMotor.getSupplyCurrent().getValueAsDouble()
+            + m_backLeftFollowerShooterMotor.getSupplyCurrent().getValueAsDouble()
+            + m_rightFollowerShooterMotor.getSupplyCurrent().getValueAsDouble()
+            + m_backRightFollowerShooterMotor.getSupplyCurrent().getValueAsDouble();
         return sum / 4;
-
     }
 
     public boolean readyToShoot() {
@@ -225,43 +220,28 @@ public class Shooter extends SubsystemBase {
             m_backRightFollowerShooterMotor.getConfigurator().apply(slot0);
         }
 
+        boolean ready = readyToShoot();
         SmartDashboard.putNumber("shot compensated distance", shotDistance);
         SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
         SmartDashboard.putNumber("interpolated pivot position", m_targetPivotPosition);
         SmartDashboard.putNumber("interpolated shooter rps", m_targetShooterRps);
-        SmartDashboard.putBoolean("ready to shoot", readyToShoot());
-
+        SmartDashboard.putBoolean("ready to shoot", ready);
 
         switch (m_pivotState) {
-            
-            case STOW -> {
-                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(ShooterConstants.kStowPivotPosition * ShooterConstants.kPivotGearRatio));
-                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(ShooterConstants.kStowPivotPosition * ShooterConstants.kPivotGearRatio));
-            }
-            case SCORE -> {
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(m_targetPivotPosition * ShooterConstants.kPivotGearRatio));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(m_targetPivotPosition * ShooterConstants.kPivotGearRatio));
-            }
-            case LOB -> {
-                // m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0.45));
-                // m_followerPivotMotor.setControl(m_positionRequest.withPosition(0.45));
-            }
-            case SHOT_BLOCK -> {
-                double framePos = m_shotBlockPivotPosition.get();
-                m_leaderPivotMotor.setControl(m_positionRequest.withPosition(framePos * ShooterConstants.kPivotGearRatio));
-                m_followerPivotMotor.setControl(m_positionRequest.withPosition(framePos * ShooterConstants.kPivotGearRatio));
-            }
+            case STOW -> setPivotPosition(ShooterConstants.kStowPivotPosition);
+            case SCORE -> setPivotPosition(m_targetPivotPosition);
+            case LOB -> setPivotPosition(ShooterConstants.kLobPivotPosition);
+            case SHOT_BLOCK -> setPivotPosition(m_shotBlockPivotPosition.get());
         }
 
         // Velocity the flywheel is being commanded to for the current state. Kept as one
         // value so shot detection below compares against what's actually commanded.
-        double commandedRps = ShooterConstants.kIdleShooterRps;
-        switch (m_shooterState) {
-            case ZERO -> commandedRps = ShooterConstants.kIdleShooterRps;
-            case SCORE -> commandedRps = m_targetShooterRps;
-            case LOB -> commandedRps = ShooterConstants.kLobShooterRps;
-            case SEND -> commandedRps = ShooterConstants.kSendShooterRps;
-        }
+        double commandedRps = switch (m_shooterState) {
+            case ZERO -> ShooterConstants.kIdleShooterRps;
+            case SCORE -> m_targetShooterRps;
+            case LOB -> ShooterConstants.kLobShooterRps;
+            case SEND -> ShooterConstants.kSendShooterRps;
+        };
         // Skip normal flywheel control while a SysId routine owns the motors.
         if (!m_characterizing) {
             setShooterVelocity(commandedRps);
@@ -291,11 +271,11 @@ public class Shooter extends SubsystemBase {
         DogLog.log("Shooter/ShotCount", m_shotCount);
         DogLog.log("Shooter/BallInFlywheel", m_inDip);
 
-    m_indexerMotor.setVoltage(m_indexerState.volts);
-    SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
-    // Publish pivot position in output (pivot) rotations for clarity
-    double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
-    SmartDashboard.putNumber("shooter position", pivotOutputRot);
+        m_indexerMotor.setVoltage(m_indexerState.volts);
+        SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
+        // Publish pivot position in output (pivot) rotations for clarity
+        double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        SmartDashboard.putNumber("shooter position", pivotOutputRot);
         // Overcurrent checks (simple): pivot and indexer
         double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
         double pivotCurrent = Math.max(m_leaderPivotMotor.getSupplyCurrent().getValueAsDouble(), m_followerPivotMotor.getSupplyCurrent().getValueAsDouble());
@@ -339,7 +319,7 @@ public class Shooter extends SubsystemBase {
         DogLog.log("Shooter/TargetRps", m_targetShooterRps);
         DogLog.log("Shooter/ActualRps", actualRps);
         DogLog.log("Shooter/RpsError", commandedRps - actualRps);
-        DogLog.log("Shooter/ReadyToShoot", readyToShoot());
+        DogLog.log("Shooter/ReadyToShoot", ready);
         DogLog.log("Shooter/AvgCurrentA", getAvgShooterCurrentDraw());
         DogLog.log("Shooter/IndexerCurrentA", indexerCurrent);
         DogLog.log("Shooter/IndexerVolts", m_indexerState.volts);
@@ -351,6 +331,13 @@ public class Shooter extends SubsystemBase {
     /** Number of balls detected leaving the flywheel (via velocity dip) since boot. */
     public int getShotCount() {
         return m_shotCount;
+    }
+
+    /** Commands both pivot motors to a target given in output (pivot) rotations. */
+    private void setPivotPosition(double outputRotations) {
+        double motorRotations = outputRotations * ShooterConstants.kPivotGearRatio;
+        m_leaderPivotMotor.setControl(m_positionRequest.withPosition(motorRotations));
+        m_followerPivotMotor.setControl(m_positionRequest.withPosition(motorRotations));
     }
 
     private void setShooterVelocity(double velocityRps) {

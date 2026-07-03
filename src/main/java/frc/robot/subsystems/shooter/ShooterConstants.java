@@ -12,10 +12,6 @@ import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
 import edu.wpi.first.math.util.Units;
 
 public final class ShooterConstants {
-    public static final String kShooterPivotStateKey = "ShooterPivotState";
-    public static final String kShooterIndexerStateKey = "ShooterIndexerState";
-    public static final String kShooterPositionKey = "ShooterPosition";
-    public static final String kShooterVelocityKey = "ShooterVelocity";
     public static final String kShooterTargetPositionKey = "ShooterTargetPosition";
 
     public static final int kIndexerMotorId = 53; // Kraken X44
@@ -35,6 +31,9 @@ public final class ShooterConstants {
     public static final double kLobShooterRps = 40;
     public static final double kSendShooterRps = 90;
     public static final double kStowPivotPosition = 0;
+    // LOB/SEND pivot target: the full feedable travel (~25 deg from stow), giving the
+    // flattest launch the kicker can still feed at -- used for ferry shots.
+    public static final double kLobPivotPosition = 25.0 / 360.0;
     // Approx 180 degrees of pivot motion (in rotations). Assumption: 0.5 rotations ~= 180°
     public static final double kShotBlockPivotPosition = 0.5;
     // Gear ratio: motor rotations per output (pivot) rotation

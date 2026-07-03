@@ -55,6 +55,8 @@ import frc.robot.subsystems.shooter.ShooterConstants;
 public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
     private final Field2d m_field = new Field2d();
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
+    // Heading-locked drive request shared by faceHubCommand; PID configured in configureAutoBuilder.
+    private final SwerveRequest.FieldCentricFacingAngle snapRequest = new SwerveRequest.FieldCentricFacingAngle();
     private Function<String, LimelightHelpers.PoseEstimate> limelightGetBotPoseEstimate =
         LimelightHelpers::getBotPoseEstimate_wpiBlue;
     private int m_rejectedVisionMeasurements = 0;
@@ -324,8 +326,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
-    boolean hubVisible = false;
-    for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
+        boolean hubVisible = false;
+        for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
             LimelightHelpers.SetRobotOrientation(
                     limelight.name(), getState().Pose.getRotation().getDegrees(), 
                     getPigeon2().getAngularVelocityZWorld().getValueAsDouble(), 
@@ -358,7 +360,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
         m_field.setRobotPose(getState().Pose);
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
-        SmartDashboard.putBoolean("hub active", hubVisible);
+        SmartDashboard.putBoolean("hub visible", hubVisible);
+        SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
         String gameData = DriverStation.getGameSpecificMessage();
@@ -373,59 +376,21 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     private boolean computeOurHubActive(double matchTime, String gameData) {
-        Optional<Alliance> alliance = DriverStation.getAlliance();
-        if (alliance.isEmpty()) {
-            return false;
-        }
-        if (DriverStation.isAutonomous()) {
-            return true;
-        }
-        if (!DriverStation.isTeleop()) {
-            return false;
-        }
-
-        // If no game data yet, assume hub active (per WPILib guidance)
-        if (gameData == null || gameData.isEmpty()) {
-            return true;
-        }
-
-        boolean redInactiveFirst;
-        switch (gameData.charAt(0)) {
-            case 'R' -> redInactiveFirst = true;
-            case 'B' -> redInactiveFirst = false;
-            default -> {
-                return true;
-            }
-        }
-
-        boolean shift1Active = switch (alliance.get()) {
-            case Red -> !redInactiveFirst;
-            case Blue -> redInactiveFirst;
-        };
-
-        if (matchTime > 130) {
-            return true;
-        } else if (matchTime > 105) {
-            return shift1Active;
-        } else if (matchTime > 80) {
-            return !shift1Active;
-        } else if (matchTime > 55) {
-            return shift1Active;
-        } else if (matchTime > 30) {
-            return !shift1Active;
-        } else {
-            return true;
-        }
+        return DriverStation.getAlliance()
+            .map(alliance -> computeHubActiveForAlliance(alliance, matchTime, gameData))
+            .orElse(false);
     }
 
+    /** 2026 game-data hub logic: hubs alternate 25 s active shifts through teleop, with the
+     *  order set by the first character of the game data ('R' = red inactive first). */
     private boolean computeHubActiveForAlliance(Alliance alliance, double matchTime, String gameData) {
-        // Same logic as computeOurHubActive but for the specified alliance
         if (DriverStation.isAutonomous()) {
             return true;
         }
         if (!DriverStation.isTeleop()) {
             return false;
         }
+        // If no game data yet, assume hub active (per WPILib guidance)
         if (gameData == null || gameData.isEmpty()) {
             return true;
         }
@@ -457,7 +422,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             return true;
         }
     }
-    
+
 
     private void startSimThread() {
         m_lastSimTime = Utils.getCurrentTimeSeconds();
@@ -568,9 +533,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             .withTargetDirection(getHubHeading())
         );
     }
-
-    private final SwerveRequest.FieldCentricFacingAngle snapRequest =
-        new SwerveRequest.FieldCentricFacingAngle();
 
     /**
      * Adds a vision measurement to the Kalman Filter. This will correct the odometry pose estimate

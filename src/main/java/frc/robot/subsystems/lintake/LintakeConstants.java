@@ -63,7 +63,6 @@ public final class LintakeConstants {
     public enum PinionState {
         STOW(-4),
         AGITATE(-7.5),
-        
         GROUND(-9.75);
 
         public final double position;
@@ -76,14 +75,12 @@ public final class LintakeConstants {
     public enum RollerState {
         ZERO(0),
         EJECT(-12),
-        INTAKE(12),
-        SCORE(12);
+        INTAKE(12);
 
-        public final double velocity;
+        public final double volts;
 
-        private RollerState(double velocity) {
-            this.velocity = velocity;
+        private RollerState(double volts) {
+            this.volts = volts;
         }
     }
-    
 }

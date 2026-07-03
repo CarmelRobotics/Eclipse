@@ -9,6 +9,7 @@ import dev.doglog.DogLogOptions;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import frc.robot.util.LoggedTunableNumber;
 
 public class Robot extends TimedRobot {
   private Command m_autonomousCommand;
@@ -21,6 +22,10 @@ public class Robot extends TimedRobot {
     // Set ntPublish(false) for competition if NT bandwidth becomes a concern.
     DogLog.setOptions(new DogLogOptions().withNtPublish(true).withCaptureDs(true));
     DogLog.setEnabled(true);
+
+    // Dashboard tunables (ShotTuning/*) are live. Set false for competition so a stray
+    // dashboard edit can't change gains or offsets mid-match.
+    LoggedTunableNumber.setTuningMode(true);
 
     m_robotContainer = new RobotContainer();
   }
