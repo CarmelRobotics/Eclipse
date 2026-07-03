@@ -3,6 +3,7 @@ package frc.robot.subsystems.shooter;
 import static edu.wpi.first.units.Units.Volts;
 
 import com.ctre.phoenix6.SignalLogger;
+import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.controls.Follower;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
@@ -17,6 +18,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
+import frc.robot.util.LoggedTunableNumber;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
@@ -70,19 +72,36 @@ public class Shooter extends SubsystemBase {
     private double m_pivotOvercurrentStartTime = 0;
     private double m_indexerOvercurrentStartTime = 0;
 
+    // Dashboard-tunable values (live while tuning mode is on, locked to default otherwise).
+    private final LoggedTunableNumber m_pivotOffset = new LoggedTunableNumber(ShooterConstants.kPivotOffsetKey, 0);
+    private final LoggedTunableNumber m_shooterRpsOffset = new LoggedTunableNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
+    private final LoggedTunableNumber m_shotBlockPivotPosition = new LoggedTunableNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
+    private final LoggedTunableNumber m_pivotCurrentLimit = new LoggedTunableNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
+    private final LoggedTunableNumber m_pivotCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
+    private final LoggedTunableNumber m_indexerCurrentLimit = new LoggedTunableNumber(ShooterConstants.kIndexerCurrentLimitKey, 25.0);
+    private final LoggedTunableNumber m_indexerCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
+
+    // Live flywheel gains -- sweep these against the DogLog RpsError trace, then paste the
+    // winners into ShooterConstants.ShooterConfigs. Defaults MUST match that class.
+    private final LoggedTunableNumber m_flywheelKp = new LoggedTunableNumber("ShotTuning/FlywheelKp", 0.3);
+    private final LoggedTunableNumber m_flywheelKs = new LoggedTunableNumber("ShotTuning/FlywheelKs", 0.15);
+    private final LoggedTunableNumber m_flywheelKv = new LoggedTunableNumber("ShotTuning/FlywheelKv", 0.125);
+
+    // Sensor-free shot detection: a ball passing through dips the flywheel velocity below
+    // its setpoint, then it recovers. Each dip-then-recover (once up to speed) = one shot.
+    private final LoggedTunableNumber m_shotDipRps = new LoggedTunableNumber("ShotTuning/ShotDipRps", 5.0);
+    private final LoggedTunableNumber m_shotRecoverRps = new LoggedTunableNumber("ShotTuning/ShotRecoverRps", 2.0);
+    private int m_shotCount = 0;
+    private boolean m_shotArmed = false;
+    private boolean m_inDip = false;
+
     private final CommandSwerveDrivetrain m_drive;
 
     public Shooter(CommandSwerveDrivetrain drive) {
         m_drive = drive;
-        SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
-        SmartDashboard.putNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
+        // Time-of-flight offset is read by the drivetrain, so it's seeded here directly;
+        // the other tuning knobs self-register via their LoggedTunableNumber fields.
         SmartDashboard.putNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
-    // Tunables for frame-clear position and current limits
-    SmartDashboard.putNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
-    SmartDashboard.putNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
-    SmartDashboard.putNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
-    SmartDashboard.putNumber(ShooterConstants.kIndexerCurrentLimitKey, 25.0);
-    SmartDashboard.putNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
 
         m_indexerMotor.getConfigurator().apply(ShooterConstants.IndexerConfig);
 
@@ -187,11 +206,23 @@ public class Shooter extends SubsystemBase {
         */
 
         double shotDistance = m_drive.getShotDistance();
-    double pivotOffset = SmartDashboard.getNumber(ShooterConstants.kPivotOffsetKey, 0);
-        double shooterRpsOffset = SmartDashboard.getNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
-    m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + pivotOffset;
-    // Allow frame-clear to be tuned on dashboard
-        m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + shooterRpsOffset;
+        m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
+        m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
+
+        // Live flywheel gain tuning: re-apply Slot0 only when a value actually changes so
+        // we're not spamming CAN config writes every loop. Evaluate all three first so each
+        // updates its change-tracking (|| would short-circuit and miss some).
+        boolean kpChanged = m_flywheelKp.hasChanged();
+        boolean ksChanged = m_flywheelKs.hasChanged();
+        boolean kvChanged = m_flywheelKv.hasChanged();
+        if (kpChanged || ksChanged || kvChanged) {
+            var slot0 = new Slot0Configs()
+                .withKP(m_flywheelKp.get()).withKS(m_flywheelKs.get()).withKV(m_flywheelKv.get()).withKA(0.2);
+            m_leftLeaderShooterMotor.getConfigurator().apply(slot0);
+            m_backLeftFollowerShooterMotor.getConfigurator().apply(slot0);
+            m_rightFollowerShooterMotor.getConfigurator().apply(slot0);
+            m_backRightFollowerShooterMotor.getConfigurator().apply(slot0);
+        }
 
         SmartDashboard.putNumber("shot compensated distance", shotDistance);
         SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
@@ -215,31 +246,50 @@ public class Shooter extends SubsystemBase {
                 // m_followerPivotMotor.setControl(m_positionRequest.withPosition(0.45));
             }
             case SHOT_BLOCK -> {
-                double framePos = SmartDashboard.getNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
+                double framePos = m_shotBlockPivotPosition.get();
                 m_leaderPivotMotor.setControl(m_positionRequest.withPosition(framePos * ShooterConstants.kPivotGearRatio));
                 m_followerPivotMotor.setControl(m_positionRequest.withPosition(framePos * ShooterConstants.kPivotGearRatio));
             }
         }
-        
 
+        // Velocity the flywheel is being commanded to for the current state. Kept as one
+        // value so shot detection below compares against what's actually commanded.
+        double commandedRps = ShooterConstants.kIdleShooterRps;
+        switch (m_shooterState) {
+            case ZERO -> commandedRps = ShooterConstants.kIdleShooterRps;
+            case SCORE -> commandedRps = m_targetShooterRps;
+            case LOB -> commandedRps = ShooterConstants.kLobShooterRps;
+            case SEND -> commandedRps = ShooterConstants.kSendShooterRps;
+        }
         // Skip normal flywheel control while a SysId routine owns the motors.
         if (!m_characterizing) {
-            switch (m_shooterState) {
-                case ZERO -> {
-                    setShooterVelocity(ShooterConstants.kIdleShooterRps);
-                }
-                case SCORE -> {
-                    setShooterVelocity(m_targetShooterRps);
-                }
-                case LOB -> {
-                    setShooterVelocity(ShooterConstants.kLobShooterRps);
-                }
-                case SEND ->{
-                    setShooterVelocity(ShooterConstants.kSendShooterRps);
+            setShooterVelocity(commandedRps);
+        }
+
+        // --- Sensor-free shot detection via the flywheel velocity dip ---
+        double actualRps = m_leftLeaderShooterMotor.getVelocity().getValueAsDouble();
+        boolean spinningForShot = !m_characterizing && m_shooterState != ShooterState.ZERO;
+        if (spinningForShot) {
+            double rpsBelowTarget = commandedRps - actualRps;
+            if (rpsBelowTarget < m_shotRecoverRps.get()) {
+                m_shotArmed = true; // reached speed at least once; ready to detect a dip
+            }
+            if (m_shotArmed) {
+                if (!m_inDip && rpsBelowTarget > m_shotDipRps.get()) {
+                    m_inDip = true;
+                } else if (m_inDip && rpsBelowTarget < m_shotRecoverRps.get()) {
+                    m_inDip = false;
+                    m_shotCount++;
                 }
             }
+        } else {
+            m_shotArmed = false;
+            m_inDip = false;
         }
-        
+        DogLog.log("Shooter/CommandedRps", commandedRps);
+        DogLog.log("Shooter/ShotCount", m_shotCount);
+        DogLog.log("Shooter/BallInFlywheel", m_inDip);
+
     m_indexerMotor.setVoltage(m_indexerState.volts);
     SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
     // Publish pivot position in output (pivot) rotations for clarity
@@ -248,8 +298,8 @@ public class Shooter extends SubsystemBase {
         // Overcurrent checks (simple): pivot and indexer
         double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
         double pivotCurrent = Math.max(m_leaderPivotMotor.getSupplyCurrent().getValueAsDouble(), m_followerPivotMotor.getSupplyCurrent().getValueAsDouble());
-        double pivotLimit = SmartDashboard.getNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
-        double pivotTimeout = SmartDashboard.getNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
+        double pivotLimit = m_pivotCurrentLimit.get();
+        double pivotTimeout = m_pivotCurrentTimeout.get();
         if (pivotCurrent > pivotLimit) {
             if (m_pivotOvercurrentStartTime == 0) m_pivotOvercurrentStartTime = now;
             else if (now - m_pivotOvercurrentStartTime > pivotTimeout) {
@@ -264,8 +314,8 @@ public class Shooter extends SubsystemBase {
         }
 
         double indexerCurrent = m_indexerMotor.getSupplyCurrent().getValueAsDouble();
-        double indexerLimit = SmartDashboard.getNumber(ShooterConstants.kIndexerCurrentLimitKey, 25.0);
-        double indexerTimeout = SmartDashboard.getNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
+        double indexerLimit = m_indexerCurrentLimit.get();
+        double indexerTimeout = m_indexerCurrentTimeout.get();
         if (indexerCurrent > indexerLimit) {
             if (m_indexerOvercurrentStartTime == 0) m_indexerOvercurrentStartTime = now;
             else if (now - m_indexerOvercurrentStartTime > indexerTimeout) {
@@ -281,14 +331,13 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
 
         // --- DogLog shot-tuning telemetry (persisted to WPILOG + live on NetworkTables) ---
-        double actualRps = m_leftLeaderShooterMotor.getVelocity().getValueAsDouble();
         DogLog.log("Shooter/ShotDistanceM", shotDistance);
         DogLog.log("Shooter/HubHeadingErrorDeg", m_drive.getHubHeadingError().getDegrees());
         DogLog.log("Shooter/TargetPivotRot", m_targetPivotPosition);
         DogLog.log("Shooter/ActualPivotRot", pivotOutputRot);
         DogLog.log("Shooter/TargetRps", m_targetShooterRps);
         DogLog.log("Shooter/ActualRps", actualRps);
-        DogLog.log("Shooter/RpsError", m_targetShooterRps - actualRps);
+        DogLog.log("Shooter/RpsError", commandedRps - actualRps);
         DogLog.log("Shooter/ReadyToShoot", readyToShoot());
         DogLog.log("Shooter/AvgCurrentA", getAvgShooterCurrentDraw());
         DogLog.log("Shooter/IndexerCurrentA", indexerCurrent);
@@ -296,6 +345,11 @@ public class Shooter extends SubsystemBase {
         DogLog.log("Shooter/PivotState", m_pivotState.toString());
         DogLog.log("Shooter/ShooterState", m_shooterState.toString());
         DogLog.log("Shooter/IndexerState", m_indexerState.toString());
+    }
+
+    /** Number of balls detected leaving the flywheel (via velocity dip) since boot. */
+    public int getShotCount() {
+        return m_shotCount;
     }
 
     private void setShooterVelocity(double velocityRps) {
