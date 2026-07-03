@@ -192,11 +192,11 @@ public class RobotContainer {
     Commands.runEnd(
       () -> {
         m_shooter.setState(PivotState.SHOT_BLOCK);
-        m_lintake.setState(PinionState.STOW);
+        m_lintake.setPinionState(PinionState.STOW);
       },
       () -> {
         m_shooter.setState(PivotState.STOW);
-        m_lintake.setState(PinionState.STOW);
+        m_lintake.setPinionState(PinionState.STOW);
       },
       m_shooter, m_lintake
     )

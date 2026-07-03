@@ -124,6 +124,20 @@ public class Shooter extends SubsystemBase {
         m_rightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
         m_backRightFollowerShooterMotor.setControl(new Follower(m_leftLeaderShooterMotor.getDeviceID(), MotorAlignmentValue.Opposed));
 
+        // Keep the status signals we actually read alive at a useful rate BEFORE optimizing
+        // the bus. optimizeBusUtilization() disables every signal not given a frequency, so
+        // without this our velocity/position/current reads would freeze at their startup
+        // value -- which silently breaks readyToShoot(), overcurrent, and shot detection.
+        m_leftLeaderShooterMotor.getVelocity().setUpdateFrequency(100);
+        m_leftLeaderShooterMotor.getSupplyCurrent().setUpdateFrequency(50);
+        m_backLeftFollowerShooterMotor.getSupplyCurrent().setUpdateFrequency(50);
+        m_rightFollowerShooterMotor.getSupplyCurrent().setUpdateFrequency(50);
+        m_backRightFollowerShooterMotor.getSupplyCurrent().setUpdateFrequency(50);
+        m_leaderPivotMotor.getPosition().setUpdateFrequency(100);
+        m_leaderPivotMotor.getSupplyCurrent().setUpdateFrequency(50);
+        m_followerPivotMotor.getSupplyCurrent().setUpdateFrequency(50);
+        m_indexerMotor.getSupplyCurrent().setUpdateFrequency(50);
+
         m_indexerMotor.optimizeBusUtilization();
         m_leaderPivotMotor.optimizeBusUtilization();
         m_followerPivotMotor.optimizeBusUtilization();
@@ -192,19 +206,6 @@ public class Shooter extends SubsystemBase {
 
     @Override
     public void periodic() {
-        /*
-        switch (m_shooterState) {
-            case ZERO -> m_leftLeaderShooterMotor.stopMotor();
-            case SCORE -> shoot();
-        }
-        switch (m_pivotState) {
-            case STOW -> m_leaderPivotMotor.setControl(m_positionRequest.withPosition(0));
-            case SCORE -> pivot();
-        }
-
-        m_indexerMotor.setControl(m_velocityRequest.withVelocity(m_indexerState.velocity));
-        */
-
         double shotDistance = m_drive.getShotDistance();
         m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
         m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();

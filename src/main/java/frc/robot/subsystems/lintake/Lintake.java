@@ -36,9 +36,13 @@ public class Lintake extends SubsystemBase {
     }
 
     public Command setState(PinionState pinionState) {
-        return runOnce(()->{
-            this.m_pinionState = pinionState;
-        });
+        return runOnce(() -> setPinionState(pinionState));
+    }
+
+    /** Imperative pinion setter for use inside command lambdas (the Command-returning
+     *  overload above is a no-op if its result isn't scheduled). */
+    public void setPinionState(PinionState pinionState) {
+        m_pinionState = pinionState;
     }
 
     public void setState(RollerState rollerState) {
