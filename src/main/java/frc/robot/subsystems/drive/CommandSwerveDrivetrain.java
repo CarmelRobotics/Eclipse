@@ -249,7 +249,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
         m_lastAlliance = Optional.of(DriverStation.getAlliance().orElse(Alliance.Blue));
         updateAllianceDependentState();
-        snapRequest.HeadingController.setP(8);
+        // P turns toward the hub; the small D damps the approach so it settles instead of
+        // overshooting and hunting. If aim chatters at rest, lower D first, then P.
+        snapRequest.HeadingController.setPID(8, 0, 0.2);
         snapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
 
         SmartDashboard.putData("Field", m_field);
@@ -347,11 +349,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
             // Vision XY, gyro heading. Vision heading jitters a few degrees frame to
             // frame; the Pigeon is far more stable, so it keeps owning rotation.
-            resetPose(new Pose2d(
-                estimate.pose.getTranslation(),
-                getState().Pose.getRotation()
-            ));
-            m_visionPoseResets++;
+            //
+            // 3 cm deadband: single-tag botpose jitters a centimeter or two between
+            // frames even when the robot is bolted still. Resetting the pose with that
+            // noise makes the aim target vibrate (which the heading controller then
+            // chases). Inside the deadband, odometry carries the pose smoothly.
+            double visionDelta = estimate.pose.getTranslation()
+                .getDistance(getState().Pose.getTranslation());
+            if (visionDelta > 0.03) {
+                resetPose(new Pose2d(
+                    estimate.pose.getTranslation(),
+                    getState().Pose.getRotation()
+                ));
+                m_visionPoseResets++;
+            }
 
             // Raw vision diagnostics -- compare these against where the robot actually is.
             SmartDashboard.putNumber("vision/pose x", estimate.pose.getX());
@@ -598,84 +609,23 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return MathUtil.clamp(getMotionCompensatedShotVector().getNorm(), 0, 6);
     }
 
-    // === Shot heading (with rotational compensation) ===
-    // PROBLEM: The robot's heading changes during ball flight. If the robot is spinning
-    // at 180°/s (2π rad/s) and the ball takes 0.8 s to reach the hub, the robot rotates
-    // 2.5 radians (143°) during flight. Without compensation, the initial aim direction
-    // is meaningless by the time the ball lands; the shot misses badly.
-    //
-    // SOLUTION: Predict where the hub will appear in robot coordinates at impact, and
-    // aim there. This involves computing the robot's rotation during TOF and rotating the
-    // aiming direction accordingly.
-    //
-    // MATHEMATICAL MODEL:
-    //   In robot body-frame coordinates (x = forward, y = left), the hub is at some
-    //   bearing θ. If the robot is stationary, θ is constant. If the robot is spinning
-    //   at ω (rad/s), then in time TOF, the robot rotates by ΔΘ = ω * TOF. From the
-    //   robot's perspective, a stationary hub appears to rotate in the *opposite*
-    //   direction at angular velocity -ω.
-    //
-    //   If the hub starts at bearing θ in the robot frame, after time TOF it appears
-    //   at bearing θ - ω*TOF (relative to the robot's body axes). So to aim where the
-    //   hub will be when the ball arrives, we compute the hub's bearing assuming the
-    //   hub rotates backward at -ω.
-    //
-    //   But the motion compensation already computes the hub's position in field space,
-    //   then converts to a bearing. So we need to adjust the bearing for the robot's
-    //   rotation. The adjustment is simple: add ω*TOF to the heading so the robot aims
-    //   ahead of where the hub appears now.
-    //
-    // INTUITION:
-    //   Imagine you're in a spinning chair, looking at a target. If you spin clockwise
-    //   while launching a ball, you must aim further counterclockwise to intercept the
-    //   target at impact, because you'll have rotated by then. The compensation angle
-    //   is the total rotation you'll undergo (angular velocity × time).
-    //
-    // SIGN CONVENTION:
-    //   Pigeon 2's Z-axis angular velocity is: +ω = CCW rotation (NED convention).
-    //   In WPILib's NED, +heading = CCW. So ω*TOF is directly the angle adjustment.
-    //
-    // CLAMPING (SANITY CHECK):
-    //   The Max rotational comp (~0.35 rad ≈ 20°) is a safety clamp. If the robot is
-    //   spinning insanely fast (>250°/s for 0.8 s TOF), clamping prevents the aiming
-    //   direction from flipping 180° and shooting backward. In practice, this clamp
-    //   prevents disaster if the gyro reading is corrupted (e.g., reads 1000 rad/s by
-    //   mistake). It's a "sanity check," not a normal operating limit.
-    //
-    // TRADEOFF:
-    //   This compensation works well for small spins (<45° during flight). For high
-    //   spin rates, the compensation is approximate because the shot vector's bearing
-    //   also rotates as the robot spins. The full solution would require non-linear
-    //   optimization; for now, this linear approximation is good enough.
 
+    // === Shot heading ===
+    // Bearing of the motion-compensated shot vector, plus the fixed mechanical offset.
+    //
+    // NOTE: this used to add an "aim ahead while spinning" term (gyro rate x TOF). It was
+    // removed on purpose -- do not add it back into this target. Two reasons:
+    //   1. Feedback loop: the heading controller's own rotation fed the term, which pushed
+    //      the target further ahead, which sped the rotation up (loop gain ~ P*TOF ~ 6).
+    //      The robot oscillated around the hub and could never settle on it.
+    //   2. Units: Pigeon getAngularVelocityZWorld() returns degrees/sec and the term used
+    //      it as radians, so any rotation at all pinned the target 20 deg off the hub.
+    // faceHubCommand drives the spin toward zero before the shot fires, so a spin term has
+    // no value in the live aiming target. If spin compensation is ever truly needed, apply
+    // it once at ball release, never inside the target the controller is chasing.
     public Rotation2d getHubHeading() {
-        Rotation2d shotHeading = getMotionCompensatedShotVector().getAngle();
-        double timeOfFlight = getShotTimeOfFlightSeconds();
-
-        // Robot angular velocity in world frame (radians/sec, +CCW per WPILib NED convention)
-        double angularRateRadPerSec = 0.0;
-        try {
-            angularRateRadPerSec = getPigeon2().getAngularVelocityZWorld().getValueAsDouble();
-        } catch (Exception ex) {
-            // Gyro is unavailable (hardware fault); assume no rotation compensation.
-            angularRateRadPerSec = 0.0;
-        }
-
-        // Total rotation angle during ball flight (radians)
-        double rotationalCompensation = angularRateRadPerSec * timeOfFlight;
-
-        // Clamp to ±0.35 rad (±20°) as a sanity check against gyro faults
-        // (e.g., gyro reads 1000 rad/s by mistake, which would cause wild aiming)
-        double maxComp = SmartDashboard.getNumber("ShotTuning/MaxRotationalCompRad", 0.35);
-        rotationalCompensation = Math.max(-maxComp, Math.min(maxComp, rotationalCompensation));
-
-        // Adjust the heading forward by the compensation. The hub is rotating backward
-        // in robot space due to the robot's spin, so we aim ahead.
-        Rotation2d compensatedHeading = shotHeading.plus(Rotation2d.fromRadians(rotationalCompensation));
-        SmartDashboard.putNumber("rotational compensation deg", Math.toDegrees(rotationalCompensation));
-
-        // Apply any hard mechanical offset (e.g., shooter mounted off-center)
-        return compensatedHeading.plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
+        return getMotionCompensatedShotVector().getAngle()
+            .plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
     }
 
     // === Heading error ===
