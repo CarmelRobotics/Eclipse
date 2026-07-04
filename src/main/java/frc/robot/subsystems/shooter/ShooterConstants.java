@@ -9,7 +9,6 @@ import com.ctre.phoenix6.signals.InvertedValue;
 
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
-import edu.wpi.first.math.util.Units;
 
 public final class ShooterConstants {
     public static final String kShooterTargetPositionKey = "ShooterTargetPosition";
@@ -76,7 +75,6 @@ public final class ShooterConstants {
     // off by >5°), increase the tolerance temporarily to diagnose the subsystem (bad gyro,
     // bad odometry, bad aiming math) rather than raising the gate timeout.
 
-    public static final double kShooterHeadingOffsetRadians = Units.degreesToRadians(0);
     // Flywheel readiness: within 3 RPS of target. At 25 RPS idle, ±3 is ±12% error.
     // Accounts for ripple from the velocity PID and CAN-bus quantization (0.25 RPS units).
     // Too tight: noisy, waits forever. Too loose: inconsistent exit speed.

@@ -42,6 +42,7 @@ import frc.robot.subsystems.localisation.LimelightHelpers;
 import frc.robot.subsystems.localisation.LimelightInfo;
 import frc.robot.subsystems.localisation.LocalisationConstants;
 import frc.robot.subsystems.shooter.ShooterConstants;
+import frc.robot.util.LoggedTunableNumber;
 
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
@@ -58,6 +59,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // Counts how many times vision has reset the pose. If this isn't climbing while a
     // tag is in view, vision positioning is broken -- check the Limelight name and NT.
     private int m_visionPoseResets = 0;
+
+    // Live aim trim (degrees). Corrects a constant left/right bias in where shots land,
+    // e.g. the shooter not sitting perfectly square on the frame. Tune on the field in
+    // 1-degree steps: if shots move the wrong way, flip the sign. Bake the final value
+    // into the default here once dialed in.
+    private final LoggedTunableNumber m_headingOffsetDeg =
+        new LoggedTunableNumber("ShotTuning/HeadingOffsetDeg", 0);
 
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
@@ -625,7 +633,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // it once at ball release, never inside the target the controller is chasing.
     public Rotation2d getHubHeading() {
         return getMotionCompensatedShotVector().getAngle()
-            .plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
+            .plus(Rotation2d.fromDegrees(m_headingOffsetDeg.get()));
     }
 
     // === Heading error ===
