@@ -177,36 +177,50 @@ public final class ShooterConstants {
 
         // Pivot angle (output rotations) by distance. Relative spacing encodes the
         // min-energy launch angles; absolute position includes the ~3° floor offset.
-        ScorePivotPositionByDistance.put(1.5, 0.008);
-        ScorePivotPositionByDistance.put(2.5, 0.027);
-        ScorePivotPositionByDistance.put(3.5, 0.038);
-        ScorePivotPositionByDistance.put(4.5, 0.045);
-        ScorePivotPositionByDistance.put(5.0, 0.048);  // table must cover the 5 m range gate
+        // RE-ANCHOR 2026-07-04 (supersedes the min-energy baseline derived above): while
+        // the hub-distance bug clamped the table at max, every shot ran hood=0.047 rot /
+        // 37.3 RPS, and that combination demonstrably landed at midrange (~2.75 m). That
+        // one working point re-anchors both curves:
+        //   - Hood model: stow launches ~70 deg from horizontal, 1 pivot deg = 1 launch
+        //     deg flatter (LOB at 25 deg pivot ~ 45 deg launch fits the same line).
+        //   - The working shot sat ~0.018 rot flatter than the min-energy curve, so the
+        //     whole pivot curve shifts up by +0.018 (same shape, kicker floor still clear;
+        //     5.0 m entry stays under the 0.0694 feedable max).
+        //   - RPS recomputed for the flatter arcs with a x1.30 real-world factor (drag +
+        //     transfer losses) calibrated from that same shot: vacuum said 28.7 where the
+        //     field needed 37.3. Sanity check: this table independently reproduces the
+        //     working midrange shot (predicts 37.0 at 2.5 m).
+        // Long end (4.5-5.0 m) is still model, not measurement -- verify and trim there.
+        ScorePivotPositionByDistance.put(1.5, 0.026);
+        ScorePivotPositionByDistance.put(2.5, 0.045);
+        ScorePivotPositionByDistance.put(3.5, 0.056);
+        ScorePivotPositionByDistance.put(4.5, 0.063);
+        ScorePivotPositionByDistance.put(5.0, 0.066);  // table must cover the 5 m range gate
 
-        // Flywheel speed (RPS) by distance. FIELD-CALIBRATED 2026-07-04: a flat +4.5 RPS
-        // trim over the vacuum baseline landed midrange but left long range short -- the
-        // drag deficit grows with distance, so the curve needs slope, not offset. The
-        // +4.5 is baked in flat through 3.5 m (confirmed good), and the 4.5-5.0 m entries
-        // carry progressively more on top (~+2 / +3 extra) to cover drag. Long end is an
-        // estimate: re-verify at 4.5 m and trim with ShooterRpsOffset, then re-bake.
-        // NOTE: after this table change, ShotTuning/ShooterRpsOffset on the dashboard
-        // must go back to 0 or the trim gets double-counted.
-        ScoreShooterRpsByDistance.put(1.5, 29.5);
-        ScoreShooterRpsByDistance.put(2.5, 32.1);
-        ScoreShooterRpsByDistance.put(3.5, 34.7);
-        ScoreShooterRpsByDistance.put(4.5, 39.5);
-        ScoreShooterRpsByDistance.put(5.0, 42.0);
+        // Flywheel speed (RPS) by distance, matched to the re-anchored (flatter) hood
+        // curve above: v^2 = g*d^2 / (2*cos^2(theta)*(d*tan(theta) - dh)) per distance,
+        // converted to wheel RPS and scaled by the field-calibrated x1.30 factor. A small
+        // progressive drag allowance (+0.5/+1/+1.5) is added at 3.5/4.5/5.0 m since the
+        // x1.30 factor was calibrated at midrange and drag grows with range.
+        // NOTE: after any table change, ShotTuning/ShooterRpsOffset AND PivotOffset on
+        // the dashboard must go back to 0 or the trims get double-counted.
+        ScoreShooterRpsByDistance.put(1.5, 34.5);
+        ScoreShooterRpsByDistance.put(2.5, 37.0);
+        ScoreShooterRpsByDistance.put(3.5, 41.0);
+        ScoreShooterRpsByDistance.put(4.5, 44.5);
+        ScoreShooterRpsByDistance.put(5.0, 46.5);
 
         // Time-of-flight (seconds) by distance. Used by the drivetrain for motion
         // compensation (where will the hub be when the ball arrives?). These are computed
         // from the trajectory equation; precision matters because errors here throw off
         // the aim heading. The TOF offset (dashboard) accounts for release latency and
         // any systematic under/overestimate in the physics model.
-        ShotTimeOfFlightSecondsByDistance.put(1.5, 0.66);
-        ShotTimeOfFlightSecondsByDistance.put(2.5, 0.77);
-        ShotTimeOfFlightSecondsByDistance.put(3.5, 0.88);
-        ShotTimeOfFlightSecondsByDistance.put(4.5, 0.99);
-        ShotTimeOfFlightSecondsByDistance.put(5.0, 1.05);
+        // Recomputed for the flatter, faster re-anchored trajectories: t = d/(v*cos(theta)).
+        ShotTimeOfFlightSecondsByDistance.put(1.5, 0.48);
+        ShotTimeOfFlightSecondsByDistance.put(2.5, 0.62);
+        ShotTimeOfFlightSecondsByDistance.put(3.5, 0.73);
+        ShotTimeOfFlightSecondsByDistance.put(4.5, 0.83);
+        ShotTimeOfFlightSecondsByDistance.put(5.0, 0.87);
     }
 
     public static double getScorePivotPosition(double distanceMeters) {
