@@ -218,6 +218,33 @@ public class Shooter extends SubsystemBase {
         });
     }
 
+    // === Clear jam command ===
+    // Reverses the flywheel and indexer motors to back out a jammed ball. The driver
+    // holds the button; once the jam clears (ball falls out or unsticks), they release
+    // and resume normal operation.
+    //
+    // WHY REVERSE? A stuck ball has friction locking it in place. Forward voltage alone
+    // can't overcome the jam. Reversing reverses the friction: if the ball is stuck
+    // against the drum, reversing lets the drum "unwind" from the ball. Also prevents
+    // damage if a mechanical jam (pinch point) is involved.
+    //
+    // SPEEDS: Flywheel at -10 RPS (slow backout) via the REVERSE ShooterState. Indexer
+    // at +4.5 V (opposite of -4.5 V feed) via the REVERSE IndexerState. Both stop on
+    // button release (states reset to default; periodic() stops the motors).
+    public Command clearJamCommand() {
+        return Commands.runEnd(
+            () -> {
+                setState(ShooterState.REVERSE);
+                setState(IndexerState.REVERSE);
+            },
+            () -> {
+                setState(ShooterState.ZERO);
+                setState(IndexerState.ZERO);
+            },
+            this
+        );
+    }
+
     public double getAvgShooterCurrentDraw() {
         double sum = m_leftLeaderShooterMotor.getSupplyCurrent().getValueAsDouble()
             + m_backLeftFollowerShooterMotor.getSupplyCurrent().getValueAsDouble()
@@ -308,6 +335,7 @@ public class Shooter extends SubsystemBase {
             case SCORE -> m_targetShooterRps;                // distance-dependent
             case LOB -> ShooterConstants.kLobShooterRps;     // ferry shot at fixed 40 RPS
             case SEND -> ShooterConstants.kSendShooterRps;   // long ferry at fixed 90 RPS
+            case REVERSE -> -10.0;                           // jam clearance: slow reverse
         };
         // While a SysId routine is running, skip normal control so the characterization
         // voltage ramp isn't immediately overwritten.

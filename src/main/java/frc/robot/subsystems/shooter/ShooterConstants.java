@@ -302,12 +302,14 @@ public final class ShooterConstants {
         ZERO,
         SCORE,
         LOB,
-        SEND;
+        SEND,
+        REVERSE;  // Back out a jammed ball at -10 RPS
     }
 
     public enum IndexerState {
         ZERO(0),
-        SCORE(kIndexerScoreVolts);
+        SCORE(kIndexerScoreVolts),
+        REVERSE(4.5);  // Back out a jammed ball toward the intake
 
         public final double volts;
 

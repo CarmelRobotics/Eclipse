@@ -214,6 +214,10 @@ public class RobotContainer {
     m_controller.povRight().whileTrue(
         heldShotCommand(PivotState.LOB, ShooterState.SEND)
     );
+
+    // Clear jam: reverse flywheel and indexer to back out a stuck ball.
+    // Hold the button until the jam clears, then release.
+    m_controller.b().whileTrue(m_shooter.clearJamCommand());
   }
 
   private Command rollerWhileHeldCommand(RollerState state) {
