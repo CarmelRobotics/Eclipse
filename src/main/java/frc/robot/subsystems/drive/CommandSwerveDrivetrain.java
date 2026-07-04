@@ -3,7 +3,6 @@ package frc.robot.subsystems.drive;
 import static edu.wpi.first.units.Units.*;
 
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.ctre.phoenix6.SignalLogger;
@@ -20,7 +19,6 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Matrix;
-import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -57,15 +55,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
     // Heading-locked drive request shared by faceHubCommand; PID configured in configureAutoBuilder.
     private final SwerveRequest.FieldCentricFacingAngle snapRequest = new SwerveRequest.FieldCentricFacingAngle();
-    private Function<String, LimelightHelpers.PoseEstimate> limelightGetBotPoseEstimate =
-        LimelightHelpers::getBotPoseEstimate_wpiBlue;
-    private int m_rejectedVisionMeasurements = 0;
-
-    // === Pose seeding from vision ===
-    // On enable, seed the robot's pose from the first valid vision measurement.
-    // This eliminates the need to hard-code starting positions and ensures the robot
-    // always starts with the true field position from AprilTag detection.
-    private boolean m_poseSeeded = false;
+    // Counts how many times vision has reset the pose. If this isn't climbing while a
+    // tag is in view, vision positioning is broken -- check the Limelight name and NT.
+    private int m_visionPoseResets = 0;
 
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
@@ -255,7 +247,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", ex.getStackTrace());
         }
 
-        setLimelightPerspective(DriverStation.getAlliance().orElse(Alliance.Blue));
         m_lastAlliance = Optional.of(DriverStation.getAlliance().orElse(Alliance.Blue));
         updateAllianceDependentState();
         snapRequest.HeadingController.setP(8);
@@ -297,18 +288,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return m_sysIdRoutineToApply.dynamic(direction);
     }
 
-    private void setLimelightPerspective(Alliance alliance) {
-        limelightGetBotPoseEstimate = alliance == Alliance.Red
-            ? LimelightHelpers::getBotPoseEstimate_wpiRed
-            : LimelightHelpers::getBotPoseEstimate_wpiBlue;
-    }
-
     private void updateAllianceDependentState() {
         DriverStation.getAlliance().ifPresent(allianceColor -> {
-            if (!m_lastAlliance.equals(Optional.of(allianceColor))) {
-                setLimelightPerspective(allianceColor);
-                m_lastAlliance = Optional.of(allianceColor);
-            }
+            m_lastAlliance = Optional.of(allianceColor);
 
             if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
                 setOperatorPerspectiveForward(
@@ -332,75 +314,57 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
-        // Reset pose seeding flag when disabled, so the next enable seeds from vision again
-        if (DriverStation.isDisabled()) {
-            m_poseSeeded = false;
-        }
-
-        // === Vision fusion (MegaTag2 AprilTag localization) ===
-        // OBJECTIVE: Fuse Limelight vision measurements into the drivetrain's Kalman filter
-        // (EKF) to correct odometry drift and improve absolute position accuracy.
+        // === Vision-direct positioning (Limelight is the pose source) ===
+        // Whenever the camera sees at least one tag, the robot pose is snapped straight
+        // to the vision estimate: vision XY + current gyro heading. No Kalman fusion, no
+        // outlier gating -- what the Limelight says is where we are.
         //
-        // KEY INSIGHT: Odometry (wheel encoders + gyro) accumulates error over time:
-        //   - Wheel slip (e.g., on carpet edges) causes position drift (~2-5 cm per match)
-        //   - Gyro bias and thermal drift cause heading error (~0.5-1° per minute)
-        //   - Acceleration causes IMU jitter (~±0.1 m/s²)
-        // Vision provides an absolute reference frame (AprilTag positions are known) and
-        // corrects these drifts whenever tags are in view. The Kalman filter balances
-        // odometry (continuously available, low latency, drifts) and vision (sporadic,
-        // ~50 ms latency, accurate when tags are visible).
+        // Always read the BLUE-origin botpose regardless of alliance. Everything else in
+        // this codebase (Field2d, hub positions, trench Y bounds, PathPlanner) uses the
+        // WPILib always-blue-origin convention, so red-origin botpose would be mirrored
+        // ~16 m away. Alliance only affects driver perspective and which hub we target.
         //
-        // THE PIPELINE (per loop):
-
+        // NOTE: the pose is reset imperatively with resetPose(). Do NOT route this through
+        // a Command-returning helper -- an unscheduled Command silently does nothing (this
+        // exact bug shipped twice: lintake stow, then vision seeding).
         boolean hubVisible = false;
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
-            // STEP 1: Inform the camera of the robot's current heading and angular rate.
-            // Why? The camera's AprilTag detector is perspective-dependent; it uses the
-            // robot's known orientation to resolve ambiguities and improve detection
-            // robustness. If the camera thinks the robot is facing wrong, tag detections
-            // may fail or be assigned to the wrong tag identity.
+            // Give the camera our heading + yaw rate (needed if we ever switch to MegaTag2;
+            // harmless for the MegaTag1 botpose read below).
             LimelightHelpers.SetRobotOrientation(
                     limelight.name(), getState().Pose.getRotation().getDegrees(),
                     getPigeon2().getAngularVelocityZWorld().getValueAsDouble(),
                     0, 0, 0, 0
                 );
 
-            // STEP 2: Read the botpose estimate from the camera.
-            // MegaTag2 processes all visible tags and solves for the single best pose
-            // hypothesis. Returns: pose (field frame), timestamp (FPGA clock), tagCount,
-            // avgTagDist (meters), avgTagArea (pixels, ~0.1-5.0 range).
-            final LimelightHelpers.PoseEstimate estimate = limelightGetBotPoseEstimate.apply(limelight.name());
+            final LimelightHelpers.PoseEstimate estimate =
+                LimelightHelpers.getBotPoseEstimate_wpiBlue(limelight.name());
 
-            if (estimate == null) {
-                continue;  // Camera did not respond (no tags, dropped frame, etc.)
+            if (estimate == null || estimate.tagCount == 0) {
+                continue;  // No tags in view; keep the last pose (odometry carries it)
             }
-            if (estimate.tagCount > 0) {
-                hubVisible = true;
+            hubVisible = true;
 
-                // === Vision-only pose mode ===
-                // Limelight is the authoritative pose source. On every valid measurement,
-                // directly set the robot pose to the vision estimate (XY only; keep gyro heading).
-                // This bypasses the Kalman filter and makes vision the ground truth.
-                // Odometry is no longer used for positioning.
-                if (estimate.tagCount > 0) {
-                    // Use vision XY, but keep the gyro heading (vision heading is noisier)
-                    Pose2d visionPose = estimate.pose;
-                    Pose2d correctedPose = new Pose2d(
-                        visionPose.getTranslation(),
-                        getState().Pose.getRotation()  // Keep gyro heading
-                    );
-                    setPose(correctedPose);
-                    m_poseSeeded = true;
-                }
-            }
+            // Vision XY, gyro heading. Vision heading jitters a few degrees frame to
+            // frame; the Pigeon is far more stable, so it keeps owning rotation.
+            resetPose(new Pose2d(
+                estimate.pose.getTranslation(),
+                getState().Pose.getRotation()
+            ));
+            m_visionPoseResets++;
+
+            // Raw vision diagnostics -- compare these against where the robot actually is.
+            SmartDashboard.putNumber("vision/pose x", estimate.pose.getX());
+            SmartDashboard.putNumber("vision/pose y", estimate.pose.getY());
+            SmartDashboard.putNumber("vision/tag count", estimate.tagCount);
+            SmartDashboard.putNumber("vision/avg tag dist", estimate.avgTagDist);
         }
 
         // === Dashboard diagnostics ===
         m_field.setRobotPose(getState().Pose);
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
         SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
-        SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);  // Outlier count
-        SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);
+        SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
         String gameData = DriverStation.getGameSpecificMessage();
@@ -489,10 +453,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     public void addVisionMeasurement(Pose2d visionRobotPoseMeters, double timestampSeconds) {
         super.addVisionMeasurement(visionRobotPoseMeters, Utils.fpgaToCurrentTime(timestampSeconds));
     }
-    public Command setPose(Pose2d pose) {
-       return runOnce(() -> this.resetPose(pose));
-    }
-
     public double getDistanceToClosestHub() {
         return getState().Pose.getTranslation().getDistance(getHubPosition());
     }
