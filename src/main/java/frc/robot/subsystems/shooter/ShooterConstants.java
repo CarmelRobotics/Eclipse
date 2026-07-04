@@ -36,8 +36,11 @@ public final class ShooterConstants {
     // LOB/SEND pivot: full feedable travel (~25°) for flattest kicker-feedable launch.
     // (If pivot goes lower, kicker wheels hit the drum. If higher, angle is too steep.)
     public static final double kLobPivotPosition = 25.0 / 360.0;  // ~0.0694 output rotations
-    // SHOT_BLOCK: blocker-clear angle. Approx 180° of available pivot motion = 0.5 rot.
-    public static final double kShotBlockPivotPosition = 0.5;
+    // SHOT_BLOCK: raise the hood as far as it goes. Field evidence (2026-07-04 tuning)
+    // says total travel is ~25 deg, so max travel IS the block position. The old value
+    // of 0.5 rot (180 deg) commanded ~7x past the hard stop and ground into the
+    // overcurrent trip every time Y was held.
+    public static final double kShotBlockPivotPosition = kLobPivotPosition;
 
     // ===== Pivot geometry =====
     public static final double kPivotGearRatio = 42.0;   // motor rotations per output rotation
@@ -191,11 +194,15 @@ public final class ShooterConstants {
         //     field needed 37.3. Sanity check: this table independently reproduces the
         //     working midrange shot (predicts 37.0 at 2.5 m).
         // Long end (4.5-5.0 m) is still model, not measurement -- verify and trim there.
-        ScorePivotPositionByDistance.put(1.5, 0.026);
-        ScorePivotPositionByDistance.put(2.5, 0.045);
-        ScorePivotPositionByDistance.put(3.5, 0.056);
-        ScorePivotPositionByDistance.put(4.5, 0.063);
-        ScorePivotPositionByDistance.put(5.0, 0.066);  // table must cover the 5 m range gate
+        // FIELD-BAKED 2026-07-04: shots landed with PivotOffset +0.02 over the re-anchored
+        // curve (tuned at close/mid range). +0.02 is baked in below; from 3.5 m out the
+        // unclamped values would exceed the ~25 deg max travel, so the hood saturates at
+        // kLobPivotPosition there and RPS alone controls depth at range.
+        ScorePivotPositionByDistance.put(1.5, 0.046);
+        ScorePivotPositionByDistance.put(2.5, 0.065);
+        ScorePivotPositionByDistance.put(3.5, kLobPivotPosition);
+        ScorePivotPositionByDistance.put(4.5, kLobPivotPosition);
+        ScorePivotPositionByDistance.put(5.0, kLobPivotPosition);  // table must cover the 5 m range gate
 
         // Flywheel speed (RPS) by distance, matched to the re-anchored (flatter) hood
         // curve above: v^2 = g*d^2 / (2*cos^2(theta)*(d*tan(theta) - dh)) per distance,
@@ -204,11 +211,14 @@ public final class ShooterConstants {
         // x1.30 factor was calibrated at midrange and drag grows with range.
         // NOTE: after any table change, ShotTuning/ShooterRpsOffset AND PivotOffset on
         // the dashboard must go back to 0 or the trims get double-counted.
-        ScoreShooterRpsByDistance.put(1.5, 34.5);
-        ScoreShooterRpsByDistance.put(2.5, 37.0);
-        ScoreShooterRpsByDistance.put(3.5, 41.0);
-        ScoreShooterRpsByDistance.put(4.5, 44.5);
-        ScoreShooterRpsByDistance.put(5.0, 46.5);
+        // FIELD-BAKED 2026-07-04: +4.5 RPS (tuned alongside the +0.02 hood trim) baked in
+        // flat. Entries past ~3.5 m run with the hood saturated at max travel and remain
+        // unverified -- trim depth there with ShooterRpsOffset only (no hood headroom).
+        ScoreShooterRpsByDistance.put(1.5, 39.0);
+        ScoreShooterRpsByDistance.put(2.5, 41.5);
+        ScoreShooterRpsByDistance.put(3.5, 45.5);
+        ScoreShooterRpsByDistance.put(4.5, 49.0);
+        ScoreShooterRpsByDistance.put(5.0, 51.0);
 
         // Time-of-flight (seconds) by distance. Used by the drivetrain for motion
         // compensation (where will the hub be when the ball arrives?). These are computed
