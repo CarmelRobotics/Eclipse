@@ -468,62 +468,92 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return ChassisSpeeds.fromRobotRelativeSpeeds(getState().Speeds, getState().Pose.getRotation());
     }
 
+    // === Shot time-of-flight ===
+    // Look up the time for the ball to reach the hub at the current distance. The offset
+    // (dashboard-tunable) accounts for release height, drag, and any frame-to-frame delay.
     public double getShotTimeOfFlightSeconds() {
         double offset = SmartDashboard.getNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
         return Math.max(0.001, ShooterConstants.getShotTimeOfFlightSeconds(getDistanceToClosestHub()) + offset);
     }
 
+    // === Shoot-on-the-move: motion compensation ===
+    // Core of the system: compute a "virtual hub position" that accounts for the robot's
+    // motion during ball flight. The math:
+    //   1. robotToHub = hub_pos - robot_pos (static target vector)
+    //   2. requiredFieldVelocity = robotToHub / TOF (velocity needed to reach hub)
+    //   3. requiredRobotVelocity = requiredFieldVelocity - robotFieldVelocity (relative to motion)
+    //   4. return requiredRobotVelocity * TOF (integrate back to a distance)
+    // This returns a distance/heading pair that, when aimed at, accounts for the robot's
+    // current velocity and yields an intersect with the hub.
     public Translation2d getMotionCompensatedShotVector() {
         Translation2d robotToHub = getHubPosition().minus(getState().Pose.getTranslation());
         double timeOfFlight = getShotTimeOfFlightSeconds();
         ChassisSpeeds fieldSpeeds = getFieldRelativeSpeeds();
 
+        // Velocity required in field space to reach the hub from current position in TOF seconds
         Translation2d requiredFieldVelocity = robotToHub.div(timeOfFlight);
+        // Robot velocity needed (relative to its own motion) to achieve that
         Translation2d requiredRobotRelativeShotVelocity = requiredFieldVelocity.minus(
             new Translation2d(fieldSpeeds.vxMetersPerSecond, fieldSpeeds.vyMetersPerSecond)
         );
 
+        // Scale by TOF to convert velocity into a distance/angle for the shooter table
         return requiredRobotRelativeShotVelocity.times(timeOfFlight);
     }
 
+    // === Compensated hub position (for visualization) ===
+    // Where the hub will be in TOF seconds, given current robot motion.
     public Translation2d getCompensatedHubPosition() {
         return getState().Pose.getTranslation().plus(getMotionCompensatedShotVector());
     }
 
+    // === Shot distance ===
+    // Magnitude of the compensated shot vector, clamped to the table's valid range (0–6 m).
     public double getShotDistance() {
         return MathUtil.clamp(getMotionCompensatedShotVector().getNorm(), 0, 6);
     }
 
+    // === Shot heading (with rotational compensation) ===
+    // The angle of the compensated shot vector, plus two corrections:
+    //   1. Robot rotation: the robot is also rotating during TOF. If the robot is turning
+    //      (angular velocity × TOF), the hub's apparent position rotates in robot-centric space.
+    //   2. Heading offset: any mechanical/software calibration offset.
     public Rotation2d getHubHeading() {
         Rotation2d shotHeading = getMotionCompensatedShotVector().getAngle();
-        // Compensate for robot rotation during ball time-of-flight
         double timeOfFlight = getShotTimeOfFlightSeconds();
-        // Angular velocity in radians/sec (world Z). Use pigeon/gyro reading available via getPigeon2()
+
+        // Robot angular velocity (radians/sec, world-frame Z = CCW+) from the Pigeon
         double angularRateRadPerSec = 0.0;
         try {
             angularRateRadPerSec = getPigeon2().getAngularVelocityZWorld().getValueAsDouble();
         } catch (Exception ex) {
-            // If gyro not available for any reason, fall back to zero compensation
+            // Gyro fault: fall back to zero compensation
             angularRateRadPerSec = 0.0;
         }
 
+        // Compensation: how much the robot rotates during ball flight
         double rotationalCompensation = angularRateRadPerSec * timeOfFlight;
-        // Allow tuning via SmartDashboard (default ~0.35 rad = ~20°)
+        // Cap it so a spin doesn't cause a wild aim error (limits to ±0.35 rad ≈ ±20°)
         double maxComp = SmartDashboard.getNumber("ShotTuning/MaxRotationalCompRad", 0.35);
         rotationalCompensation = Math.max(-maxComp, Math.min(maxComp, rotationalCompensation));
 
         Rotation2d compensatedHeading = shotHeading.plus(Rotation2d.fromRadians(rotationalCompensation));
-        // Publish the compensation applied in degrees for debugging
         SmartDashboard.putNumber("rotational compensation deg", Math.toDegrees(rotationalCompensation));
         return compensatedHeading.plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
     }
 
+    // === Heading error ===
+    // How far off the robot's current heading is from the computed shot heading.
+    // This is the readiness gate for aim (must be within 5°).
     public Rotation2d getHubHeadingError() {
         return Rotation2d.fromRadians(
             MathUtil.angleModulus(getHubHeading().minus(getState().Pose.getRotation()).getRadians())
         );
     }
 
+    // === Face hub command ===
+    // Heading-locked drive: the heading snaps to the computed hub heading (with PID stiffness),
+    // while the driver retains full translation control. Used during aiming and charging shots.
     public Command faceHubCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity) {
         return applyRequest(() -> snapRequest
             .withVelocityX(xVelocity.get())

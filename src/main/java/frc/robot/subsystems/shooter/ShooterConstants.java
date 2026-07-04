@@ -24,35 +24,50 @@ public final class ShooterConstants {
     public static final int kRightFollowerShooterMotorId = 11;
     public static final int kBackRightFollowerShooterMotorId = 49;
 
+    // ===== Game-specific targets =====
+    // Hub positions in blue-origin field coordinates (field corners: blue (0,0), red (16.54, 8.21)).
     public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
 
-    public static final double kIdleShooterRps = 0.5;
-    public static final double kLobShooterRps = 40;
-    public static final double kSendShooterRps = 90;
-    public static final double kStowPivotPosition = 0;
-    // LOB/SEND pivot target: the full feedable travel (~25 deg from stow), giving the
-    // flattest launch the kicker can still feed at -- used for ferry shots.
-    public static final double kLobPivotPosition = 25.0 / 360.0;
-    // Approx 180 degrees of pivot motion (in rotations). Assumption: 0.5 rotations ~= 180°
+    // ===== Shooter fixed states =====
+    public static final double kIdleShooterRps = 0.5;        // wheel spinning slowly while coasting
+    public static final double kLobShooterRps = 40;          // ferry shot (slower pass through field)
+    public static final double kSendShooterRps = 90;         // long ferry shot (fast pass)
+    public static final double kStowPivotPosition = 0;       // stow angle (output rotations)
+    // LOB/SEND pivot: full feedable travel (~25°) for flattest kicker-feedable launch.
+    // (If pivot goes lower, kicker wheels hit the drum. If higher, angle is too steep.)
+    public static final double kLobPivotPosition = 25.0 / 360.0;  // ~0.0694 output rotations
+    // SHOT_BLOCK: blocker-clear angle. Approx 180° of available pivot motion = 0.5 rot.
     public static final double kShotBlockPivotPosition = 0.5;
-    // Gear ratio: motor rotations per output (pivot) rotation
-    public static final double kPivotGearRatio = 42.0;
-    // SmartDashboard keys for runtime tuning
+
+    // ===== Pivot geometry =====
+    public static final double kPivotGearRatio = 42.0;   // motor rotations per output rotation
+
+    // ===== Live tuning keys (dashboard) =====
     public static final String kShotBlockPivotPositionKey = "ShotTuning/ShotBlockPivotPosition";
     public static final String kPivotCurrentLimitKey = "ShotTuning/PivotCurrentLimitA";
     public static final String kPivotCurrentTimeoutKey = "ShotTuning/PivotCurrentTimeoutS";
     public static final String kIndexerCurrentLimitKey = "ShotTuning/IndexerCurrentLimitA";
     public static final String kIndexerCurrentTimeoutKey = "ShotTuning/IndexerCurrentTimeoutS";
-    public static final double kIndexerScoreVolts = -4.5;
-    public static final double kShooterHeadingOffsetRadians = Units.degreesToRadians(0);
-    public static final double kShooterReadyToleranceRps = 3.0;
-    public static final double kPivotReadyToleranceRotations = 0.04;
-    public static final double kHeadingReadyToleranceDegrees = 5.0;
-    public static final double kMaxShotDistanceMeters = 5.0;
-    public static final double kMaxVisionCorrectionMeters = 1.0;
-    public static final double kShotSpinupTimeoutSeconds = 1.25;
 
+    // ===== Indexer/kicker =====
+    public static final double kIndexerScoreVolts = -4.5;   // negative = feed the ball into the drum
+
+    // ===== Readiness gates =====
+    // These define the tolerances for the four conditions that must be true before
+    // readyToShoot() returns true. If any gate is stuck open, the shot waits until
+    // the 1.25 s force-feed timeout, then feeds anyway.
+    public static final double kShooterHeadingOffsetRadians = Units.degreesToRadians(0);
+    public static final double kShooterReadyToleranceRps = 3.0;        // within 3 RPS of target
+    public static final double kPivotReadyToleranceRotations = 0.04;   // within 0.04 rot (~14°)
+    public static final double kHeadingReadyToleranceDegrees = 5.0;    // within 5° of hub heading
+    public static final double kMaxShotDistanceMeters = 5.0;           // don't shoot beyond 5 m
+    public static final double kMaxVisionCorrectionMeters = 1.0;       // outlier rejection threshold
+    public static final double kShotSpinupTimeoutSeconds = 1.25;       // force-feed after this if not ready
+
+    // ===== Tuning offsets (dashboard) =====
+    // These shift the entire shot table without code redeploy. The driver can trim the
+    // pivot angle and RPS globally to match the real robot's performance.
     public static final String kPivotOffsetKey = "ShotTuning/PivotOffset";
     public static final String kShooterRpsOffsetKey = "ShotTuning/ShooterRpsOffset";
     public static final String kTimeOfFlightOffsetKey = "ShotTuning/TimeOfFlightOffset";

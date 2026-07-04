@@ -85,11 +85,14 @@ public class RobotContainer {
   }
 
   private void registerNamedCommands() {
+    // Named commands for autonomous routines (referenced by PathPlanner autos).
     NamedCommands.registerCommand("zerodrive", Commands.none());
     NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
     NamedCommands.registerCommand("intake retract", m_lintake.setState(PinionState.STOW));
+    // Roller commands are runOnce lambdas since setState(RollerState) is void (not Command).
     NamedCommands.registerCommand("intake run", Commands.runOnce(() -> m_lintake.setState(RollerState.INTAKE)));
     NamedCommands.registerCommand("intake stop", Commands.runOnce(() -> m_lintake.setState(RollerState.ZERO)));
+    // Shoot: prepare, wait until ready-or-timeout, feed. 1.5 s feed window in auto.
     NamedCommands.registerCommand("shoot", timedShotCommand(PivotState.SCORE, ShooterState.SCORE, 1.5));
     NamedCommands.registerCommand("stopshoot", stopShooterCommand());
   }
@@ -97,6 +100,8 @@ public class RobotContainer {
   private void configureBindings() {
     final SwerveRequest idle = new SwerveRequest.Idle();
 
+    // === Drive default command ===
+    // Field-centric swerve with driver translation and rotation, deadbands on both.
     m_drivetrain.setDefaultCommand(
         m_drivetrain.applyRequest(() -> driveRequest
             .withVelocityX(driverXVelocity())
@@ -105,31 +110,36 @@ public class RobotContainer {
         )
     );
 
+    // When disabled, request idle (zero voltage out), ignoring the disabled() gate.
     RobotModeTriggers.disabled().whileTrue(
         m_drivetrain.applyRequest(() -> idle).ignoringDisable(true)
     );
 
-    // --- Trench heading lock ---
-    // Configure the heading PID once here. Same gains as faceHubCommand.
+    // === Trench automation ===
+    // When the robot enters either trench (Y outside the field bounds), heading-lock the
+    // drive to 0° or 180° (whichever is closer, with hysteresis so it doesn't flip-flop),
+    // stow the shooter to clear the trench bar, and deploy the intake to GROUND. Driver
+    // retains full translation control. On exit, intake restows but shooter stays stowed
+    // so the driver can manually re-target the hub.
+
+    // Configure the heading PID once here; same gains as faceHubCommand (P = 8).
     trenchSnapRequest.HeadingController.setP(8.0);
     trenchSnapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    // True when the robot's Y coordinate is inside either trench zone.
+    // True when the robot's Y coordinate is inside either trench zone (Y >= 7.3 m or Y <= 0.7 m).
     Trigger inTrench = new Trigger(() -> {
       double y = m_drivetrain.getState().Pose.getY();
       return y >= LEFT_TRENCH_Y_MIN || y <= RIGHT_TRENCH_Y_MAX;
     });
 
-    // While in the trench:
-    //   - lock heading to 180° (blue) / 0° (red) so intake faces into the trench
-    //   - stow the shooter pivot so it doesn't clip the trench bar
-    //   - deploy the lintake to GROUND so the driver can just drive through and pick up
-    // onFalse undoes the mechanical actions when the robot exits.
     inTrench.whileTrue(
         Commands.parallel(
-            // Drive with heading locked to trench angle; driver still controls translation.
+            // === Heading snap ===
+            // Snap to the nearer of 0°/180° with 30° hysteresis. The hysteresis prevents
+            // flip-flopping when the robot straddles 90°: if we're on 180° and the nearest
+            // snappable angle is 0°, only switch if we're more than 30° away from our
+            // current lock. This keeps the intake pointed steadily into the trench.
             m_drivetrain.applyRequest(() -> {
-              // Snap to whichever heading (0° or 180°) the robot is currently closer to.
               Rotation2d currentRot = m_drivetrain.getState().Pose.getRotation();
               Rotation2d target0 = Rotation2d.fromDegrees(0);
               Rotation2d target180 = Rotation2d.fromDegrees(180);
@@ -140,7 +150,6 @@ public class RobotContainer {
               if (m_trenchLockHeading == null) {
                 m_trenchLockHeading = nearest;
               } else {
-                // Only flip if the nearest heading is sufficiently farther from the current lock
                 double distToCurrent = Math.abs(MathUtil.angleModulus(currentRot.minus(m_trenchLockHeading).getRadians()));
                 if (nearest != m_trenchLockHeading && distToCurrent > hystRad) {
                   m_trenchLockHeading = nearest;
@@ -153,15 +162,14 @@ public class RobotContainer {
                   .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
                   .withTargetDirection(m_trenchLockHeading);
             }),
-            // Stow shooter so it clears the trench bar
+            // Stow shooter pivot so it doesn't clip the trench bar (clearance ~15 cm)
             Commands.runOnce(() -> m_shooter.setState(PivotState.STOW), m_shooter),
-            // Deploy lintake to ground for immediate intaking as you drive through
+            // Deploy intake to GROUND so the driver can sweep fuel as they drive through
             m_lintake.setState(PinionState.GROUND)
         )
     );
 
-    // When exiting the trench, stow the lintake back.
-    // Shooter stays stowed — driver can re-spin it with rightTrigger as normal.
+    // On exit, stow the intake. Shooter stays stowed; driver re-targets with rightTrigger.
     inTrench.onFalse(m_lintake.setState(PinionState.STOW));
 
     // --- Standard driver bindings (unchanged) ---
@@ -216,10 +224,11 @@ public class RobotContainer {
     );
   }
 
-  // Shot sequence: aim/spin up, wait until readyToShoot() OR the spinup timeout
-  // expires, then feed. The waitUntil completes on whichever comes first, so if the
-  // shot never satisfies every readiness gate it force-feeds after
-  // kShotSpinupTimeoutSeconds rather than hanging with the flywheel spinning forever.
+  // === Timed shot (autonomous) ===
+  // Shot sequence: prepare (set pivot + spin up) → wait until readyToShoot() OR 1.25 s
+  // timeout expires (whichever first) → feed for feedSeconds. The timeout ensures shots
+  // never hang with the flywheel running forever; after the timeout, feed unconditionally.
+  // finallyDo() guarantees motors stop even if the command is interrupted mid-sequence.
   private Command timedShotCommand(PivotState pivotState, ShooterState shooterState, double feedSeconds) {
     return Commands.sequence(
         prepareShotCommand(pivotState, shooterState),
@@ -228,6 +237,10 @@ public class RobotContainer {
     ).finallyDo(interrupted -> stopShooter());
   }
 
+  // === Held shot (teleop) ===
+  // Same sequence as timedShotCommand, but the feed runs until the command is manually
+  // released by the driver (no withTimeout on feed). Still uses readyToShoot/timeout so
+  // the shot can't hang mid-spin.
   private Command heldShotCommand(PivotState pivotState, ShooterState shooterState) {
     return Commands.sequence(
         prepareShotCommand(pivotState, shooterState),
@@ -236,6 +249,8 @@ public class RobotContainer {
     ).finallyDo(interrupted -> stopShooter());
   }
 
+  // === Shot prep ===
+  // Set both pivot and shooter state in one command, run once on shot trigger.
   private Command prepareShotCommand(PivotState pivotState, ShooterState shooterState) {
     return Commands.runOnce(() -> {
       m_shooter.setState(pivotState);
@@ -243,18 +258,24 @@ public class RobotContainer {
     }, m_shooter);
   }
 
+  // === Stop shooter (for named commands / direct calls) ===
   private Command stopShooterCommand() {
     return Commands.runOnce(this::stopShooter, m_shooter);
   }
 
+  // === Shooter stop (imperative) ===
+  // Zeroes the indexer, flywheel, and pivot in one go. Called by finallyDo() on shot
+  // command exit, guaranteeing cleanup no matter where the sequence is interrupted.
   private void stopShooter() {
     m_shooter.setState(IndexerState.ZERO);
     m_shooter.setState(ShooterState.ZERO);
     m_shooter.setState(PivotState.STOW);
   }
 
-  // Unconditionally run the indexer. Only reached after the readyToShoot()/timeout
-  // wait, so this is where the "shoot anyway after the timeout" behavior happens.
+  // === Feed (unconditional) ===
+  // Run the indexer. Only reached after readyToShoot() *or* the spinup timeout, so this
+  // is where the "force-feed after timeout" behavior happens. The command continues until
+  // timed out (autonomous) or manually released (teleop).
   private void feed() {
     m_shooter.setState(IndexerState.SCORE);
   }

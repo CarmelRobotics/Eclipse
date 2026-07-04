@@ -61,16 +61,27 @@ public class Shooter extends SubsystemBase {
         )
     );
 
+    // ===== State Targets =====
+    // These are set each loop by looking up shot distance. Pivot and RPS are then adjusted
+    // by live dashboard offsets so you can trim without code redeploy.
     private PivotState m_pivotState = PivotState.STOW;
     private ShooterState m_shooterState = ShooterState.ZERO;
     private IndexerState m_indexerState = IndexerState.ZERO;
-    private double m_targetPivotPosition = ShooterConstants.kStowPivotPosition;
+    private double m_targetPivotPosition = ShooterConstants.kStowPivotPosition;  // in output (pivot) rotations
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
-    // Overcurrent protection trackers
+
+    // ===== Protection =====
+    // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
+    // for longer than the timeout, the motor is zeroed and the system falls back to a safe
+    // state. This prevents the pivot from stalling into a hard stop or the indexer from
+    // jamming on a foreign object. Thresholds are dashboard-tunable mid-match.
     private double m_pivotOvercurrentStartTime = 0;
     private double m_indexerOvercurrentStartTime = 0;
 
-    // Dashboard-tunable values (live while tuning mode is on, locked to default otherwise).
+    // ===== Live Tuning =====
+    // Dashboard-tunable values; live while LoggedTunableNumber.setTuningMode(true), else
+    // locked to compiled defaults for competition. Offsets shift the entire interp table
+    // without code changes, so field tuning is a few dashboard edits away.
     private final LoggedTunableNumber m_pivotOffset = new LoggedTunableNumber(ShooterConstants.kPivotOffsetKey, 0);
     private final LoggedTunableNumber m_shooterRpsOffset = new LoggedTunableNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
     private final LoggedTunableNumber m_shotBlockPivotPosition = new LoggedTunableNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
@@ -79,19 +90,25 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_indexerCurrentLimit = new LoggedTunableNumber(ShooterConstants.kIndexerCurrentLimitKey, 25.0);
     private final LoggedTunableNumber m_indexerCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
 
-    // Live flywheel gains -- sweep these against the DogLog RpsError trace, then paste the
-    // winners into ShooterConstants.ShooterConfigs. Defaults MUST match that class.
+    // ===== Flywheel Tuning =====
+    // Live gains: change these on the dashboard against the DogLog RpsError trace, find
+    // the stiffest gains without ringing recovery, then paste winners into ShooterConstants.
+    // The gain profile is re-applied *only* when a value actually changes so we're not
+    // hammering the CAN bus with redundant config writes.
     private final LoggedTunableNumber m_flywheelKp = new LoggedTunableNumber("ShotTuning/FlywheelKp", 0.3);
     private final LoggedTunableNumber m_flywheelKs = new LoggedTunableNumber("ShotTuning/FlywheelKs", 0.15);
     private final LoggedTunableNumber m_flywheelKv = new LoggedTunableNumber("ShotTuning/FlywheelKv", 0.125);
 
-    // Sensor-free shot detection: a ball passing through dips the flywheel velocity below
-    // its setpoint, then it recovers. Each dip-then-recover (once up to speed) = one shot.
+    // ===== Sensor-Free Shot Detection =====
+    // No beam break: instead, detect that a ball has passed through by the velocity dip.
+    // Once the wheel is within m_shotRecoverRps of target (m_shotArmed = true), watch for
+    // a dip > m_shotDipRps; when recovery brings it back below m_shotRecoverRps (m_inDip
+    // transitions false), count it as a shot. This detects passes at all speeds.
     private final LoggedTunableNumber m_shotDipRps = new LoggedTunableNumber("ShotTuning/ShotDipRps", 5.0);
     private final LoggedTunableNumber m_shotRecoverRps = new LoggedTunableNumber("ShotTuning/ShotRecoverRps", 2.0);
     private int m_shotCount = 0;
-    private boolean m_shotArmed = false;
-    private boolean m_inDip = false;
+    private boolean m_shotArmed = false;   // the wheel has reached target velocity at least once
+    private boolean m_inDip = false;       // currently experiencing a velocity dip
 
     private final CommandSwerveDrivetrain m_drive;
 
@@ -201,25 +218,35 @@ public class Shooter extends SubsystemBase {
 
     @Override
     public void periodic() {
+        // === Update shot targets from drivetrain compensation ===
+        // The drivetrain computes motion-compensated distance and heading each loop;
+        // we interpolate the shot table to get the pivot and RPS for that distance, then
+        // add the live offsets so the driver can trim without redeploying.
         double shotDistance = m_drive.getShotDistance();
         m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
         m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
 
-        // Live flywheel gain tuning: re-apply Slot0 only when a value actually changes so
-        // we're not spamming CAN config writes every loop. Evaluate all three first so each
-        // updates its change-tracking (|| would short-circuit and miss some).
+        // === Live flywheel gain re-tuning ===
+        // Check each gain independently for changes (don't use || short-circuit; each
+        // LoggedTunableNumber tracks its own "has this changed since last read" state).
+        // Only re-apply Slot0 configs when at least one changes, so we don't spam the
+        // CAN bus with redundant writes every loop.
         boolean kpChanged = m_flywheelKp.hasChanged();
         boolean ksChanged = m_flywheelKs.hasChanged();
         boolean kvChanged = m_flywheelKv.hasChanged();
         if (kpChanged || ksChanged || kvChanged) {
             var slot0 = new Slot0Configs()
                 .withKP(m_flywheelKp.get()).withKS(m_flywheelKs.get()).withKV(m_flywheelKv.get()).withKA(0.2);
+            // Apply the same profile to all four motors so they stay in sync.
             m_leftLeaderShooterMotor.getConfigurator().apply(slot0);
             m_backLeftFollowerShooterMotor.getConfigurator().apply(slot0);
             m_rightFollowerShooterMotor.getConfigurator().apply(slot0);
             m_backRightFollowerShooterMotor.getConfigurator().apply(slot0);
         }
 
+        // === Readiness diagnostics ===
+        // readyToShoot() is an AND of four independent gates; each is published so the
+        // driver can see which gate is holding up the shot without guessing.
         boolean ready = readyToShoot();
         SmartDashboard.putNumber("shot compensated distance", shotDistance);
         SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
@@ -227,6 +254,9 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putNumber("interpolated shooter rps", m_targetShooterRps);
         SmartDashboard.putBoolean("ready to shoot", ready);
 
+        // === Pivot position control ===
+        // The switch drives the pivot to the target for the current state (STOW, SCORE,
+        // LOB with a fixed 25° for max feedable travel, or SHOT_BLOCK for blocker clearance).
         switch (m_pivotState) {
             case STOW -> setPivotPosition(ShooterConstants.kStowPivotPosition);
             case SCORE -> setPivotPosition(m_targetPivotPosition);
@@ -234,36 +264,44 @@ public class Shooter extends SubsystemBase {
             case SHOT_BLOCK -> setPivotPosition(m_shotBlockPivotPosition.get());
         }
 
-        // Velocity the flywheel is being commanded to for the current state. Kept as one
-        // value so shot detection below compares against what's actually commanded.
+        // === Flywheel velocity command ===
+        // Compute the commanded RPS for the current state. This is kept as a single
+        // variable so shot detection below can measure actual vs. commanded to detect
+        // the velocity dip when a ball passes through.
         double commandedRps = switch (m_shooterState) {
-            case ZERO -> ShooterConstants.kIdleShooterRps;
-            case SCORE -> m_targetShooterRps;
-            case LOB -> ShooterConstants.kLobShooterRps;
-            case SEND -> ShooterConstants.kSendShooterRps;
+            case ZERO -> ShooterConstants.kIdleShooterRps;  // 0.5 RPS idle
+            case SCORE -> m_targetShooterRps;                // distance-dependent
+            case LOB -> ShooterConstants.kLobShooterRps;     // ferry shot at fixed 40 RPS
+            case SEND -> ShooterConstants.kSendShooterRps;   // long ferry at fixed 90 RPS
         };
-        // Skip normal flywheel control while a SysId routine owns the motors.
+        // While a SysId routine is running, skip normal control so the characterization
+        // voltage ramp isn't immediately overwritten.
         if (!m_characterizing) {
             setShooterVelocity(commandedRps);
         }
 
-        // --- Sensor-free shot detection via the flywheel velocity dip ---
+        // === Sensor-free shot detection ===
+        // State machine: once wheel reaches target (m_shotArmed), watch for a dip
+        // (actual RPS drops more than m_shotDipRps below commanded), then recovery
+        // (actual comes back within m_shotRecoverRps of target). Each dip-recovery counts
+        // as one shot. Works at all speeds and doesn't need a beam break.
         double actualRps = m_leftLeaderShooterMotor.getVelocity().getValueAsDouble();
         boolean spinningForShot = !m_characterizing && m_shooterState != ShooterState.ZERO;
         if (spinningForShot) {
             double rpsBelowTarget = commandedRps - actualRps;
             if (rpsBelowTarget < m_shotRecoverRps.get()) {
-                m_shotArmed = true; // reached speed at least once; ready to detect a dip
+                m_shotArmed = true;  // wheel has reached target; ready to detect dips
             }
             if (m_shotArmed) {
                 if (!m_inDip && rpsBelowTarget > m_shotDipRps.get()) {
                     m_inDip = true;
                 } else if (m_inDip && rpsBelowTarget < m_shotRecoverRps.get()) {
                     m_inDip = false;
-                    m_shotCount++;
+                    m_shotCount++;  // dip-recovery complete; count a shot
                 }
             }
         } else {
+            // Not spinning; reset the state machine.
             m_shotArmed = false;
             m_inDip = false;
         }
@@ -271,12 +309,16 @@ public class Shooter extends SubsystemBase {
         DogLog.log("Shooter/ShotCount", m_shotCount);
         DogLog.log("Shooter/BallInFlywheel", m_inDip);
 
+        // === Indexer voltage control ===
         m_indexerMotor.setVoltage(m_indexerState.volts);
         SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
-        // Publish pivot position in output (pivot) rotations for clarity
         double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
         SmartDashboard.putNumber("shooter position", pivotOutputRot);
-        // Overcurrent checks (simple): pivot and indexer
+
+        // === Overcurrent protection: Pivot ===
+        // If pivot supply current exceeds the limit for longer than the timeout, zeroing
+        // the motor and falling back to STOW. This protects against stalling into a hard
+        // stop. Thresholds are dashboard-tunable mid-match.
         double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
         double pivotCurrent = Math.max(m_leaderPivotMotor.getSupplyCurrent().getValueAsDouble(), m_followerPivotMotor.getSupplyCurrent().getValueAsDouble());
         double pivotLimit = m_pivotCurrentLimit.get();
@@ -284,7 +326,7 @@ public class Shooter extends SubsystemBase {
         if (pivotCurrent > pivotLimit) {
             if (m_pivotOvercurrentStartTime == 0) m_pivotOvercurrentStartTime = now;
             else if (now - m_pivotOvercurrentStartTime > pivotTimeout) {
-                // trip: stop pivot and stow
+                // Trip: stop the pivot, force stow, and flag the trip on the dashboard.
                 m_leaderPivotMotor.setVoltage(0);
                 m_followerPivotMotor.setVoltage(0);
                 m_pivotState = PivotState.STOW;
@@ -294,6 +336,7 @@ public class Shooter extends SubsystemBase {
             m_pivotOvercurrentStartTime = 0;
         }
 
+        // === Overcurrent protection: Indexer ===
         double indexerCurrent = m_indexerMotor.getSupplyCurrent().getValueAsDouble();
         double indexerLimit = m_indexerCurrentLimit.get();
         double indexerTimeout = m_indexerCurrentTimeout.get();
