@@ -405,6 +405,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
         SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
         SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
+        // Aim sanity checks: WHICH hub the shot math is targeting and the heading it
+        // wants. If "dist to hub" doesn't match a tape measure, everything downstream
+        // (hood angle, RPS, aim) is being computed for the wrong target.
+        Translation2d targetHub = getHubPosition();
+        SmartDashboard.putNumber("aim/target hub x", targetHub.getX());
+        SmartDashboard.putNumber("aim/target hub y", targetHub.getY());
+        SmartDashboard.putNumber("aim/hub heading deg", getHubHeading().getDegrees());
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
         String gameData = DriverStation.getGameSpecificMessage();
@@ -497,10 +504,21 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return getState().Pose.getTranslation().getDistance(getHubPosition());
     }
 
+    // Which hub to aim at. In a real match (FMS attached) it's the alliance hub. In the
+    // shop it's whichever hub is CLOSER -- practice DSes routinely sit on the wrong
+    // alliance, and aiming at the far hub (~9 m away) made the robot "aim forward" from
+    // everywhere and clamped the shot tables at max range (max hood angle, max RPS).
     public Translation2d getHubPosition() {
-        return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
-            ? ShooterConstants.kRedHubPosition
-            : ShooterConstants.kBlueHubPosition;
+        if (DriverStation.isFMSAttached()) {
+            return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+                ? ShooterConstants.kRedHubPosition
+                : ShooterConstants.kBlueHubPosition;
+        }
+        Translation2d robot = getState().Pose.getTranslation();
+        return robot.getDistance(ShooterConstants.kBlueHubPosition)
+                <= robot.getDistance(ShooterConstants.kRedHubPosition)
+            ? ShooterConstants.kBlueHubPosition
+            : ShooterConstants.kRedHubPosition;
     }
 
     public ChassisSpeeds getFieldRelativeSpeeds() {
