@@ -30,7 +30,7 @@ public final class ShooterConstants {
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
 
     // ===== Shooter fixed states =====
-    public static final double kIdleShooterRps = 0.5;        // wheel spinning slowly while coasting
+    public static final double kIdleShooterRps = 6.7;        // wheel spinning slowly while coasting
     public static final double kLobShooterRps = 40;          // ferry shot (slower pass through field)
     public static final double kSendShooterRps = 90;         // long ferry shot (fast pass)
     public static final double kStowPivotPosition = 0;       // stow angle (output rotations)
