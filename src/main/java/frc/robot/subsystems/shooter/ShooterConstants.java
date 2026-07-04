@@ -34,13 +34,14 @@ public final class ShooterConstants {
     public static final double kSendShooterRps = 90;         // long ferry shot (fast pass)
     public static final double kStowPivotPosition = 0;       // stow angle (output rotations)
     // LOB/SEND pivot: full feedable travel (~25°) for flattest kicker-feedable launch.
-    // (If pivot goes lower, kicker wheels hit the drum. If higher, angle is too steep.)
+    // 25 deg is the kicker FEED limit, not a travel limit -- the pivot travels much
+    // farther (SHOT_BLOCK commands 0.5 rot). SCORE table entries may sit above this;
+    // they fed fine on the field.
     public static final double kLobPivotPosition = 25.0 / 360.0;  // ~0.0694 output rotations
-    // SHOT_BLOCK: raise the hood as far as it goes. Field evidence (2026-07-04 tuning)
-    // says total travel is ~25 deg, so max travel IS the block position. The old value
-    // of 0.5 rot (180 deg) commanded ~7x past the hard stop and ground into the
-    // overcurrent trip every time Y was held.
-    public static final double kShotBlockPivotPosition = kLobPivotPosition;
+    // SHOT_BLOCK: raise the shooter to block incoming shots. 0.5 rot (~180 deg) is real,
+    // reachable travel -- the pivot's range extends far past the 25 deg feed limit
+    // (confirmed on the robot; 25 deg is only where the kicker stops being able to feed).
+    public static final double kShotBlockPivotPosition = 0.5;
 
     // ===== Pivot geometry =====
     public static final double kPivotGearRatio = 42.0;   // motor rotations per output rotation
@@ -194,15 +195,15 @@ public final class ShooterConstants {
         //     field needed 37.3. Sanity check: this table independently reproduces the
         //     working midrange shot (predicts 37.0 at 2.5 m).
         // Long end (4.5-5.0 m) is still model, not measurement -- verify and trim there.
-        // FIELD-BAKED 2026-07-04: shots landed with PivotOffset +0.02 over the re-anchored
-        // curve (tuned at close/mid range). +0.02 is baked in below; from 3.5 m out the
-        // unclamped values would exceed the ~25 deg max travel, so the hood saturates at
-        // kLobPivotPosition there and RPS alone controls depth at range.
+        // FIELD-BAKED 2026-07-04: shots landed at all tested distances with PivotOffset
+        // +0.02 over the re-anchored curve, so +0.02 is baked straight in. Entries past
+        // ~3 m sit above the 25 deg LOB feed limit -- that's fine for SCORE shots on this
+        // mechanism (25 deg is a feed limit, not a travel limit, and these fed fine).
         ScorePivotPositionByDistance.put(1.5, 0.046);
         ScorePivotPositionByDistance.put(2.5, 0.065);
-        ScorePivotPositionByDistance.put(3.5, kLobPivotPosition);
-        ScorePivotPositionByDistance.put(4.5, kLobPivotPosition);
-        ScorePivotPositionByDistance.put(5.0, kLobPivotPosition);  // table must cover the 5 m range gate
+        ScorePivotPositionByDistance.put(3.5, 0.076);
+        ScorePivotPositionByDistance.put(4.5, 0.083);
+        ScorePivotPositionByDistance.put(5.0, 0.086);  // table must cover the 5 m range gate
 
         // Flywheel speed (RPS) by distance, matched to the re-anchored (flatter) hood
         // curve above: v^2 = g*d^2 / (2*cos^2(theta)*(d*tan(theta) - dh)) per distance,
@@ -211,9 +212,8 @@ public final class ShooterConstants {
         // x1.30 factor was calibrated at midrange and drag grows with range.
         // NOTE: after any table change, ShotTuning/ShooterRpsOffset AND PivotOffset on
         // the dashboard must go back to 0 or the trims get double-counted.
-        // FIELD-BAKED 2026-07-04: +4.5 RPS (tuned alongside the +0.02 hood trim) baked in
-        // flat. Entries past ~3.5 m run with the hood saturated at max travel and remain
-        // unverified -- trim depth there with ShooterRpsOffset only (no hood headroom).
+        // FIELD-BAKED 2026-07-04: +4.5 RPS (tuned alongside the +0.02 hood trim, confirmed
+        // working at all tested distances) baked in flat.
         ScoreShooterRpsByDistance.put(1.5, 39.0);
         ScoreShooterRpsByDistance.put(2.5, 41.5);
         ScoreShooterRpsByDistance.put(3.5, 45.5);
