@@ -61,6 +61,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         LimelightHelpers::getBotPoseEstimate_wpiBlue;
     private int m_rejectedVisionMeasurements = 0;
 
+    // === Pose seeding from vision ===
+    // On enable, seed the robot's pose from the first valid vision measurement.
+    // This eliminates the need to hard-code starting positions and ensures the robot
+    // always starts with the true field position from AprilTag detection.
+    private boolean m_poseSeeded = false;
+
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
     private double m_lastSimTime;
@@ -326,6 +332,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
+        // Reset pose seeding flag when disabled, so the next enable seeds from vision again
+        if (DriverStation.isDisabled()) {
+            m_poseSeeded = false;
+        }
+
         // === Vision fusion (MegaTag2 AprilTag localization) ===
         // OBJECTIVE: Fuse Limelight vision measurements into the drivetrain's Kalman filter
         // (EKF) to correct odometry drift and improve absolute position accuracy.
@@ -365,6 +376,16 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             }
             if (estimate.tagCount > 0) {
                 hubVisible = true;
+
+                // === Pose seeding from vision on enable ===
+                // If this is the first valid vision measurement after enable, use it to seed
+                // the robot's pose. This eliminates hard-coded starting positions and ensures
+                // the robot always knows its true location from AprilTag detection.
+                if (!m_poseSeeded && estimate.tagCount > 0) {
+                    setPose(estimate.pose);
+                    m_poseSeeded = true;
+                    SmartDashboard.putString("Pose seed", "SEEDED from vision");
+                }
 
                 // STEP 3: Outlier rejection.
                 // If the vision estimate is >1.0 m away from current odometry, reject it.
