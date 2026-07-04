@@ -377,76 +377,21 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             if (estimate.tagCount > 0) {
                 hubVisible = true;
 
-                // === Pose seeding from vision on enable ===
-                // If this is the first valid vision measurement after enable, use it to seed
-                // the robot's pose. This eliminates hard-coded starting positions and ensures
-                // the robot always knows its true location from AprilTag detection.
-                if (!m_poseSeeded && estimate.tagCount > 0) {
-                    setPose(estimate.pose);
+                // === Vision-only pose mode ===
+                // Limelight is the authoritative pose source. On every valid measurement,
+                // directly set the robot pose to the vision estimate (XY only; keep gyro heading).
+                // This bypasses the Kalman filter and makes vision the ground truth.
+                // Odometry is no longer used for positioning.
+                if (estimate.tagCount > 0) {
+                    // Use vision XY, but keep the gyro heading (vision heading is noisier)
+                    Pose2d visionPose = estimate.pose;
+                    Pose2d correctedPose = new Pose2d(
+                        visionPose.getTranslation(),
+                        getState().Pose.getRotation()  // Keep gyro heading
+                    );
+                    setPose(correctedPose);
                     m_poseSeeded = true;
-                    SmartDashboard.putString("Pose seed", "SEEDED from vision");
                 }
-
-                // STEP 3: Outlier rejection.
-                // If the vision estimate is >1.0 m away from current odometry, reject it.
-                // Why? The tag detection is probably wrong (two-sided tag ambiguity, reflection,
-                // false detection). Feeding this to the Kalman filter would corrupt the state
-                // estimate and cause the robot to diverge.
-                //
-                // HEURISTIC JUSTIFICATION: Odometry drift is <5 cm/s (typical). If a vision
-                // measurement is available every 0.05 s (50 ms latency), the odometry could
-                // have drifted at most 0.25 cm. A 1.0 m outlier is >3σ away and indicates
-                // a gross error, not a measurement. This threshold is conservative; in practice,
-                // outliers are >2-3 m away (tag detected on opposite side).
-                double poseDelta = estimate.pose.getTranslation().getDistance(getState().Pose.getTranslation());
-                if (poseDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
-                    m_rejectedVisionMeasurements++;
-                    continue;  // Reject this measurement; don't fuse it
-                }
-
-                // STEP 4: Compute standard deviation (std dev) for the Kalman filter.
-                // The Kalman filter is a weighted average: the estimate with the lower std dev
-                // "wins." Vision's std dev depends on measurement quality:
-                //   - If multiple tags visible (tagCount>1) and nearby: high confidence, low std dev
-                //   - If single tag or far away: low confidence, high std dev
-                //
-                // The formula:
-                //   if (avgTagDist > 0.125 m AND avgTagArea < 2.5 px²):
-                //     stdDev = 0.25 m (conservative; far or small tags are noisy)
-                //   else:
-                //     stdDev = 0.6^(avgTagDist+1) meters (exponential decay with distance)
-                //
-                // INTERPRETATION:
-                //   At avgTagDist = 0.5 m: stdDev = 0.6^1.5 ≈ 0.43 m (low confidence)
-                //   At avgTagDist = 1.0 m: stdDev = 0.6^2 = 0.36 m (moderate)
-                //   At avgTagDist = 2.0 m: stdDev = 0.6^3 = 0.22 m (higher confidence)
-                //   At avgTagDist = 3.0 m: stdDev = 0.6^4 = 0.13 m (very high confidence)
-                //
-                // This is heuristic. Real tuning would measure camera accuracy (e.g., launch
-                // a ball 100 times from a fixed position, measure variance of pose estimates).
-                // For now, this formula is validated through field testing.
-                final double xyStdDev;
-                if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
-                    xyStdDev = 0.25;  // Clamp to conservative value for far/small tags
-                } else {
-                    xyStdDev = Math.pow(0.6, estimate.avgTagDist + 1);
-                }
-
-                // STEP 5: Fuse the measurement into the Kalman filter.
-                // addVisionMeasurement parameters:
-                //   pose: the detected robot pose (field frame)
-                //   timestamp: when the frame was captured (FPGA clock)
-                //   stdDev: VecBuilder.fill(xy_error, xy_error, heading_error)
-                //     - XY: computed above (distance-dependent)
-                //     - Heading: Double.MAX_VALUE = "infinite" (we don't trust vision heading)
-                //       Why? Vision heading is noisy (camera jitter ~1°) and susceptible to
-                //       mount miscalibration. The Pigeon 2 gyro is much more stable (~0.1°/s
-                //       drift). So we let the Pigeon own heading; vision only corrects XY.
-                //
-                // The EKF internally backtracks the state estimate to the measurement time
-                // (to account for latency), applies the update with Kalman gains weighted by
-                // the std devs, then re-projects to the current time. All transparent to us.
-                addVisionMeasurement(estimate.pose, estimate.timestampSeconds, VecBuilder.fill(xyStdDev, xyStdDev, Double.MAX_VALUE));
             }
         }
 
