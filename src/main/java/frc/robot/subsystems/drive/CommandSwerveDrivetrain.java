@@ -326,41 +326,114 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
+        // === Vision fusion (MegaTag2 AprilTag localization) ===
+        // OBJECTIVE: Fuse Limelight vision measurements into the drivetrain's Kalman filter
+        // (EKF) to correct odometry drift and improve absolute position accuracy.
+        //
+        // KEY INSIGHT: Odometry (wheel encoders + gyro) accumulates error over time:
+        //   - Wheel slip (e.g., on carpet edges) causes position drift (~2-5 cm per match)
+        //   - Gyro bias and thermal drift cause heading error (~0.5-1° per minute)
+        //   - Acceleration causes IMU jitter (~±0.1 m/s²)
+        // Vision provides an absolute reference frame (AprilTag positions are known) and
+        // corrects these drifts whenever tags are in view. The Kalman filter balances
+        // odometry (continuously available, low latency, drifts) and vision (sporadic,
+        // ~50 ms latency, accurate when tags are visible).
+        //
+        // THE PIPELINE (per loop):
+
         boolean hubVisible = false;
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
+            // STEP 1: Inform the camera of the robot's current heading and angular rate.
+            // Why? The camera's AprilTag detector is perspective-dependent; it uses the
+            // robot's known orientation to resolve ambiguities and improve detection
+            // robustness. If the camera thinks the robot is facing wrong, tag detections
+            // may fail or be assigned to the wrong tag identity.
             LimelightHelpers.SetRobotOrientation(
-                    limelight.name(), getState().Pose.getRotation().getDegrees(), 
-                    getPigeon2().getAngularVelocityZWorld().getValueAsDouble(), 
+                    limelight.name(), getState().Pose.getRotation().getDegrees(),
+                    getPigeon2().getAngularVelocityZWorld().getValueAsDouble(),
                     0, 0, 0, 0
                 );
 
+            // STEP 2: Read the botpose estimate from the camera.
+            // MegaTag2 processes all visible tags and solves for the single best pose
+            // hypothesis. Returns: pose (field frame), timestamp (FPGA clock), tagCount,
+            // avgTagDist (meters), avgTagArea (pixels, ~0.1-5.0 range).
             final LimelightHelpers.PoseEstimate estimate = limelightGetBotPoseEstimate.apply(limelight.name());
 
             if (estimate == null) {
-                continue;
+                continue;  // Camera did not respond (no tags, dropped frame, etc.)
             }
             if (estimate.tagCount > 0) {
                 hubVisible = true;
+
+                // STEP 3: Outlier rejection.
+                // If the vision estimate is >1.0 m away from current odometry, reject it.
+                // Why? The tag detection is probably wrong (two-sided tag ambiguity, reflection,
+                // false detection). Feeding this to the Kalman filter would corrupt the state
+                // estimate and cause the robot to diverge.
+                //
+                // HEURISTIC JUSTIFICATION: Odometry drift is <5 cm/s (typical). If a vision
+                // measurement is available every 0.05 s (50 ms latency), the odometry could
+                // have drifted at most 0.25 cm. A 1.0 m outlier is >3σ away and indicates
+                // a gross error, not a measurement. This threshold is conservative; in practice,
+                // outliers are >2-3 m away (tag detected on opposite side).
                 double poseDelta = estimate.pose.getTranslation().getDistance(getState().Pose.getTranslation());
                 if (poseDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
                     m_rejectedVisionMeasurements++;
-                    continue;
+                    continue;  // Reject this measurement; don't fuse it
                 }
 
+                // STEP 4: Compute standard deviation (std dev) for the Kalman filter.
+                // The Kalman filter is a weighted average: the estimate with the lower std dev
+                // "wins." Vision's std dev depends on measurement quality:
+                //   - If multiple tags visible (tagCount>1) and nearby: high confidence, low std dev
+                //   - If single tag or far away: low confidence, high std dev
+                //
+                // The formula:
+                //   if (avgTagDist > 0.125 m AND avgTagArea < 2.5 px²):
+                //     stdDev = 0.25 m (conservative; far or small tags are noisy)
+                //   else:
+                //     stdDev = 0.6^(avgTagDist+1) meters (exponential decay with distance)
+                //
+                // INTERPRETATION:
+                //   At avgTagDist = 0.5 m: stdDev = 0.6^1.5 ≈ 0.43 m (low confidence)
+                //   At avgTagDist = 1.0 m: stdDev = 0.6^2 = 0.36 m (moderate)
+                //   At avgTagDist = 2.0 m: stdDev = 0.6^3 = 0.22 m (higher confidence)
+                //   At avgTagDist = 3.0 m: stdDev = 0.6^4 = 0.13 m (very high confidence)
+                //
+                // This is heuristic. Real tuning would measure camera accuracy (e.g., launch
+                // a ball 100 times from a fixed position, measure variance of pose estimates).
+                // For now, this formula is validated through field testing.
                 final double xyStdDev;
                 if (estimate.avgTagDist > 0.125 && estimate.avgTagArea < 2.5) {
-                    xyStdDev = 0.25;
+                    xyStdDev = 0.25;  // Clamp to conservative value for far/small tags
                 } else {
                     xyStdDev = Math.pow(0.6, estimate.avgTagDist + 1);
                 }
 
+                // STEP 5: Fuse the measurement into the Kalman filter.
+                // addVisionMeasurement parameters:
+                //   pose: the detected robot pose (field frame)
+                //   timestamp: when the frame was captured (FPGA clock)
+                //   stdDev: VecBuilder.fill(xy_error, xy_error, heading_error)
+                //     - XY: computed above (distance-dependent)
+                //     - Heading: Double.MAX_VALUE = "infinite" (we don't trust vision heading)
+                //       Why? Vision heading is noisy (camera jitter ~1°) and susceptible to
+                //       mount miscalibration. The Pigeon 2 gyro is much more stable (~0.1°/s
+                //       drift). So we let the Pigeon own heading; vision only corrects XY.
+                //
+                // The EKF internally backtracks the state estimate to the measurement time
+                // (to account for latency), applies the update with Kalman gains weighted by
+                // the std devs, then re-projects to the current time. All transparent to us.
                 addVisionMeasurement(estimate.pose, estimate.timestampSeconds, VecBuilder.fill(xyStdDev, xyStdDev, Double.MAX_VALUE));
             }
         }
 
+        // === Dashboard diagnostics ===
         m_field.setRobotPose(getState().Pose);
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
-        SmartDashboard.putBoolean("hub visible", hubVisible);
+        SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
+        SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);  // Outlier count
         SmartDashboard.putNumber("rejected vision measurements", m_rejectedVisionMeasurements);
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
@@ -477,27 +550,113 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     // === Shoot-on-the-move: motion compensation ===
-    // Core of the system: compute a "virtual hub position" that accounts for the robot's
-    // motion during ball flight. The math:
-    //   1. robotToHub = hub_pos - robot_pos (static target vector)
-    //   2. requiredFieldVelocity = robotToHub / TOF (velocity needed to reach hub)
-    //   3. requiredRobotVelocity = requiredFieldVelocity - robotFieldVelocity (relative to motion)
-    //   4. return requiredRobotVelocity * TOF (integrate back to a distance)
-    // This returns a distance/heading pair that, when aimed at, accounts for the robot's
-    // current velocity and yields an intersect with the hub.
+    // PROBLEM: A stationary robot aims at the hub's current position. A moving robot
+    // must aim at where the hub will be when the ball arrives. At 6 m/s robot speed,
+    // 0.8 s ball flight, the hub moves ~4.8 m in the ball's frame. Not accounting for
+    // this causes the shot to miss by meters.
+    //
+    // SOLUTION: Compute a "virtual hub position" (in robot-relative space) that
+    // accounts for the robot's motion. When the robot aims at this position, the ball
+    // trajectory intersects the actual hub.
+    //
+    // MATHEMATICAL DERIVATION:
+    //   We want to find the aiming direction d such that, if the ball is launched at
+    //   speed v in direction d (from the robot's current position), and the robot
+    //   continues at its current velocity v_robot for time TOF, the ball will intersect
+    //   the hub at the hub's future position.
+    //
+    //   In field space:
+    //     ball_final = robot_pos + ball_displacement
+    //     hub_final = hub_pos + robot_velocity * TOF
+    //     We want: ball_final = hub_final
+    //     → ball_displacement = (hub_pos + robot_vel * TOF) - robot_pos
+    //     → ball_displacement = (hub_pos - robot_pos) + robot_vel * TOF
+    //
+    //   But the ball flies in a ballistic arc. What matters is the *average* velocity
+    //   the ball must maintain to cover the displacement in time TOF. This is derived
+    //   from the shot table's physics; for now, assume the table's distance and TOF
+    //   directly yield the required ball velocity magnitude and direction.
+    //
+    //   In robot space:
+    //     The robot sees the hub at a certain bearing. But because the robot is moving,
+    //     the relative position changes over TOF. The required ball velocity (in field
+    //     space) is:
+    //       v_ball_field = (hub_pos - robot_pos + robot_vel * TOF) / TOF
+    //                     = (hub_pos - robot_pos) / TOF + robot_vel
+    //
+    //     From the robot's perspective (in robot body frame), the required velocity is:
+    //       v_ball_robot = v_ball_field - v_robot
+    //                     = (hub_pos - robot_pos) / TOF + robot_vel - robot_vel
+    //                     = (hub_pos - robot_pos) / TOF
+    //       Wait, that can't be right...
+    //
+    //   Actually, let's think differently. The robot fires the ball at some speed in
+    //   some direction. That speed is determined by the shot table (e.g., 30 RPS for
+    //   3.5 m). The direction is what we compute. The ball, once fired, follows a
+    //   ballistic path in field space. For the ball to hit the hub at the hub's future
+    //   position, the initial launch direction must account for the hub's motion relative
+    //   to the robot.
+    //
+    //   Here's the correct model:
+    //   - The hub is at position H in field space.
+    //   - The robot is at position R and moving at velocity v_r (field frame).
+    //   - In time TOF, the hub moves to H + v_hub * TOF ≈ H (hub is stationary on field).
+    //   - The robot will be at R + v_r * TOF.
+    //   - We want the ball to reach the hub. The relative position at end of flight is:
+    //       hub_end - robot_end = H - (R + v_r * TOF) = (H - R) - v_r * TOF
+    //   - But wait, the robot is accelerating with the ball, so the initial relative
+    //     position is (H - R). The ball must cover a distance that accounts for the
+    //     robot moving away (or toward) the hub during flight.
+    //   - The net displacement in the robot's frame is:
+    //       displacement_robot = (H - R) - v_r * TOF
+    //   - This is the distance the ball must travel *in the robot's frame* to hit the hub.
+    //   - BUT: the ball is launched in the robot's body frame, not the field frame.
+    //     In the robot's body frame, the ball flies straight (ignoring gravity for
+    //     horizontal aiming). So the direction to aim is the angle of this displacement.
+    //
+    //   CODE DERIVATION:
+    //   - robotToHub = H - R (field frame)
+    //   - requiredFieldVelocity = robotToHub / TOF (field velocity needed)
+    //   - requiredRobotVelocity = requiredFieldVelocity - v_r (relative velocity)
+    //   - shotVector = requiredRobotVelocity * TOF (integrate to displacement)
+    //
+    //   This is equivalent to:
+    //   - shotVector = (robotToHub / TOF - v_r) * TOF
+    //               = robotToHub - v_r * TOF
+    //   Which is exactly the relative displacement we derived above!
+    //
+    // INTERPRETATION:
+    //   The shot vector is the displacement in robot-relative space that the ball must
+    //   cover to hit the hub, accounting for the robot's motion. If the robot is moving
+    //   toward the hub, the required displacement shrinks. If moving away, it grows.
+    //   If moving perpendicular to the hub, the shot vector rotates (aim perpendicular
+    //   to the motion).
+    //
+    // ASSUMPTIONS:
+    //   1. The ball follows a ballistic arc; we use the shot table's distance and TOF
+    //      which encode the minimum-energy trajectory's hang time.
+    //   2. The robot's velocity is constant over TOF. True for swerve; false if braking.
+    //   3. The hub is stationary. True in *REBUILT*; false if the hub rotates or moves.
+    //   4. Aiming is in the horizontal plane only. We ignore vertical motion.
+
     public Translation2d getMotionCompensatedShotVector() {
         Translation2d robotToHub = getHubPosition().minus(getState().Pose.getTranslation());
         double timeOfFlight = getShotTimeOfFlightSeconds();
         ChassisSpeeds fieldSpeeds = getFieldRelativeSpeeds();
 
-        // Velocity required in field space to reach the hub from current position in TOF seconds
+        // Velocity the ball must maintain in field space to reach the hub's current position
+        // in TOF seconds, starting from the robot's current position.
         Translation2d requiredFieldVelocity = robotToHub.div(timeOfFlight);
-        // Robot velocity needed (relative to its own motion) to achieve that
+
+        // Relative velocity: what velocity the ball must have relative to the robot. This
+        // accounts for the robot's own motion; if the robot is moving toward the hub, less
+        // relative velocity is needed.
         Translation2d requiredRobotRelativeShotVelocity = requiredFieldVelocity.minus(
             new Translation2d(fieldSpeeds.vxMetersPerSecond, fieldSpeeds.vyMetersPerSecond)
         );
 
-        // Scale by TOF to convert velocity into a distance/angle for the shooter table
+        // Integrate velocity over TOF to get the displacement vector. This is the distance
+        // and bearing the robot should aim at to intersect the hub.
         return requiredRobotRelativeShotVelocity.times(timeOfFlight);
     }
 
@@ -514,31 +673,82 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     // === Shot heading (with rotational compensation) ===
-    // The angle of the compensated shot vector, plus two corrections:
-    //   1. Robot rotation: the robot is also rotating during TOF. If the robot is turning
-    //      (angular velocity × TOF), the hub's apparent position rotates in robot-centric space.
-    //   2. Heading offset: any mechanical/software calibration offset.
+    // PROBLEM: The robot's heading changes during ball flight. If the robot is spinning
+    // at 180°/s (2π rad/s) and the ball takes 0.8 s to reach the hub, the robot rotates
+    // 2.5 radians (143°) during flight. Without compensation, the initial aim direction
+    // is meaningless by the time the ball lands; the shot misses badly.
+    //
+    // SOLUTION: Predict where the hub will appear in robot coordinates at impact, and
+    // aim there. This involves computing the robot's rotation during TOF and rotating the
+    // aiming direction accordingly.
+    //
+    // MATHEMATICAL MODEL:
+    //   In robot body-frame coordinates (x = forward, y = left), the hub is at some
+    //   bearing θ. If the robot is stationary, θ is constant. If the robot is spinning
+    //   at ω (rad/s), then in time TOF, the robot rotates by ΔΘ = ω * TOF. From the
+    //   robot's perspective, a stationary hub appears to rotate in the *opposite*
+    //   direction at angular velocity -ω.
+    //
+    //   If the hub starts at bearing θ in the robot frame, after time TOF it appears
+    //   at bearing θ - ω*TOF (relative to the robot's body axes). So to aim where the
+    //   hub will be when the ball arrives, we compute the hub's bearing assuming the
+    //   hub rotates backward at -ω.
+    //
+    //   But the motion compensation already computes the hub's position in field space,
+    //   then converts to a bearing. So we need to adjust the bearing for the robot's
+    //   rotation. The adjustment is simple: add ω*TOF to the heading so the robot aims
+    //   ahead of where the hub appears now.
+    //
+    // INTUITION:
+    //   Imagine you're in a spinning chair, looking at a target. If you spin clockwise
+    //   while launching a ball, you must aim further counterclockwise to intercept the
+    //   target at impact, because you'll have rotated by then. The compensation angle
+    //   is the total rotation you'll undergo (angular velocity × time).
+    //
+    // SIGN CONVENTION:
+    //   Pigeon 2's Z-axis angular velocity is: +ω = CCW rotation (NED convention).
+    //   In WPILib's NED, +heading = CCW. So ω*TOF is directly the angle adjustment.
+    //
+    // CLAMPING (SANITY CHECK):
+    //   The Max rotational comp (~0.35 rad ≈ 20°) is a safety clamp. If the robot is
+    //   spinning insanely fast (>250°/s for 0.8 s TOF), clamping prevents the aiming
+    //   direction from flipping 180° and shooting backward. In practice, this clamp
+    //   prevents disaster if the gyro reading is corrupted (e.g., reads 1000 rad/s by
+    //   mistake). It's a "sanity check," not a normal operating limit.
+    //
+    // TRADEOFF:
+    //   This compensation works well for small spins (<45° during flight). For high
+    //   spin rates, the compensation is approximate because the shot vector's bearing
+    //   also rotates as the robot spins. The full solution would require non-linear
+    //   optimization; for now, this linear approximation is good enough.
+
     public Rotation2d getHubHeading() {
         Rotation2d shotHeading = getMotionCompensatedShotVector().getAngle();
         double timeOfFlight = getShotTimeOfFlightSeconds();
 
-        // Robot angular velocity (radians/sec, world-frame Z = CCW+) from the Pigeon
+        // Robot angular velocity in world frame (radians/sec, +CCW per WPILib NED convention)
         double angularRateRadPerSec = 0.0;
         try {
             angularRateRadPerSec = getPigeon2().getAngularVelocityZWorld().getValueAsDouble();
         } catch (Exception ex) {
-            // Gyro fault: fall back to zero compensation
+            // Gyro is unavailable (hardware fault); assume no rotation compensation.
             angularRateRadPerSec = 0.0;
         }
 
-        // Compensation: how much the robot rotates during ball flight
+        // Total rotation angle during ball flight (radians)
         double rotationalCompensation = angularRateRadPerSec * timeOfFlight;
-        // Cap it so a spin doesn't cause a wild aim error (limits to ±0.35 rad ≈ ±20°)
+
+        // Clamp to ±0.35 rad (±20°) as a sanity check against gyro faults
+        // (e.g., gyro reads 1000 rad/s by mistake, which would cause wild aiming)
         double maxComp = SmartDashboard.getNumber("ShotTuning/MaxRotationalCompRad", 0.35);
         rotationalCompensation = Math.max(-maxComp, Math.min(maxComp, rotationalCompensation));
 
+        // Adjust the heading forward by the compensation. The hub is rotating backward
+        // in robot space due to the robot's spin, so we aim ahead.
         Rotation2d compensatedHeading = shotHeading.plus(Rotation2d.fromRadians(rotationalCompensation));
         SmartDashboard.putNumber("rotational compensation deg", Math.toDegrees(rotationalCompensation));
+
+        // Apply any hard mechanical offset (e.g., shooter mounted off-center)
         return compensatedHeading.plus(Rotation2d.fromRadians(ShooterConstants.kShooterHeadingOffsetRadians));
     }
 

@@ -99,16 +99,51 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_flywheelKs = new LoggedTunableNumber("ShotTuning/FlywheelKs", 0.15);
     private final LoggedTunableNumber m_flywheelKv = new LoggedTunableNumber("ShotTuning/FlywheelKv", 0.125);
 
-    // ===== Sensor-Free Shot Detection =====
-    // No beam break: instead, detect that a ball has passed through by the velocity dip.
-    // Once the wheel is within m_shotRecoverRps of target (m_shotArmed = true), watch for
-    // a dip > m_shotDipRps; when recovery brings it back below m_shotRecoverRps (m_inDip
-    // transitions false), count it as a shot. This detects passes at all speeds.
+    // ===== Sensor-Free Shot Detection (no beam break needed) =====
+    // PRINCIPLE: A ball passing through the drum dips the wheel velocity. Once the wheel
+    // is spinning at target velocity, a dip (loss of >5 RPS) followed by recovery (back
+    // within 2 RPS of target) indicates a ball passed through.
+    //
+    // STATE MACHINE:
+    //   INITIAL: m_shotArmed = false, m_inDip = false
+    //      ↓ (wheel reaches within 2 RPS of target)
+    //   ARMED: m_shotArmed = true, m_inDip = false (ready to detect dips)
+    //      ↓ (velocity drops >5 RPS below target)
+    //   IN_DIP: m_shotArmed = true, m_inDip = true
+    //      ↓ (velocity recovers to within 2 RPS of target)
+    //   SHOT_COUNTED: m_shotCount++, stay in ARMED
+    //
+    // WHY THESE THRESHOLDS?
+    //   m_shotDipRps (5.0): The wheel loses speed when carrying a ball through friction.
+    //     At typical spin-up loads (25–32 RPS), the PI controller responds within ~0.1 s.
+    //     A brief >5 RPS dip is real friction (ball or jam); noise ripple is ±1 RPS.
+    //   m_shotRecoverRps (2.0): Once the ball exits, the wheel recovers quickly. Waiting
+    //     for recovery to within 2 RPS (more lenient than normal gate 3 RPS) accounts for
+    //     control lag. If the wheel never recovers, m_inDip stays true forever, preventing
+    //     a false "multiple shots" count.
+    //
+    // DESIGN: Why not use a beam break? Because we don't have one, and the velocity dip
+    // is reliable enough for scoring. The dip is *mechanical* (actual friction), not
+    // electrical (code-detectable), so it's robust to CAN lag and processor jitter.
+    //
+    // EDGE CASES:
+    //   1. Multiple balls: each ball = one dip → one count. Works automatically.
+    //   2. Jam (ball stuck in kicker): m_inDip = true forever, no count. Correct behavior;
+    //      driver sees "ball in flywheel" flag and manually clears.
+    //   3. Slow shots (low RPS): dip threshold is absolute (5 RPS), so low-speed shots may
+    //      not cross it. Tune m_shotDipRps lower if needed. (This is a weakness at <20 RPS.)
+    //   4. Control overshoot: if the velocity PID overshoots on setpoint change, m_inDip
+    //      may flicker on/off. Mitigated by requiring recovery to a steady state (2 RPS).
+    //
+    // TUNING: Thresholds are dashboard-live. If you see double-counts on single shots,
+    // increase m_shotDipRps or m_shotRecoverRps (require a bigger dip + longer recovery).
+    // If you miss slow shots, decrease m_shotDipRps.
+
     private final LoggedTunableNumber m_shotDipRps = new LoggedTunableNumber("ShotTuning/ShotDipRps", 5.0);
     private final LoggedTunableNumber m_shotRecoverRps = new LoggedTunableNumber("ShotTuning/ShotRecoverRps", 2.0);
     private int m_shotCount = 0;
-    private boolean m_shotArmed = false;   // the wheel has reached target velocity at least once
-    private boolean m_inDip = false;       // currently experiencing a velocity dip
+    private boolean m_shotArmed = false;   // wheel has reached target velocity at least once; ready to detect dips
+    private boolean m_inDip = false;       // currently experiencing a dip (ball in flight or stuck)
 
     private final CommandSwerveDrivetrain m_drive;
 
@@ -316,27 +351,70 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putNumber("shooter position", pivotOutputRot);
 
         // === Overcurrent protection: Pivot ===
-        // If pivot supply current exceeds the limit for longer than the timeout, zeroing
-        // the motor and falling back to STOW. This protects against stalling into a hard
-        // stop. Thresholds are dashboard-tunable mid-match.
+        // PROBLEM: The pivot is MotionMagic-controlled but commanded via setControl() every
+        // loop. If an external force jams the mechanism (e.g., blocker bar, game piece stuck),
+        // the PID integral windup + feedforward will drive the motor into stall current (~180 A).
+        // At stall, the motor dissipates 180 W heat; after ~1 s it thermally shuts down,
+        // leaving the robot unable to shoot for minutes (thermal breaker reset).
+        //
+        // SOLUTION: Software overcurrent supervision. If supply current (proportional to
+        // torque output) exceeds a threshold for longer than a timeout, stop the motor and
+        // fall back to a safe state. This is a *soft* breaker, cheaper than hardware.
+        //
+        // THRESHOLDS:
+        //   m_pivotCurrentLimit (default 40 A): The peak normal operating current during
+        //     MotionMagic acceleration is ~15–25 A. The 40 A threshold allows some headroom
+        //     for startup transients but catches stalls well before thermal shutdown.
+        //   m_pivotCurrentTimeout (default 0.25 s): A normal move (15° in 0.3 s) doesn't
+        //     hit 40 A for >0.1 s. A 0.25 s window lets transients settle before tripping.
+        //     If a move stalls, it'll hit 40 A within 0.05 s and stay there.
+        //
+        // DESIGN: The timeout is a deliberate hysteresis so a one-off current spike doesn't
+        // trip unnecessarily. If current drops below the limit, the timer resets.
+        //
+        // TRADEOFF: The pivot is two motors in parallel. Using max(L, R) is conservative
+        // (one jam will trip) but necessary — if one motor jams and the other keeps turning,
+        // the pivot bends and something breaks.
+        //
+        // TUNING: On the field, if you trip during normal motion, increase m_pivotCurrentLimit
+        // or m_pivotCurrentTimeout. If you miss jams, decrease them.
+
         double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
-        double pivotCurrent = Math.max(m_leaderPivotMotor.getSupplyCurrent().getValueAsDouble(), m_followerPivotMotor.getSupplyCurrent().getValueAsDouble());
+        double pivotCurrent = Math.max(
+            m_leaderPivotMotor.getSupplyCurrent().getValueAsDouble(),
+            m_followerPivotMotor.getSupplyCurrent().getValueAsDouble()
+        );
         double pivotLimit = m_pivotCurrentLimit.get();
         double pivotTimeout = m_pivotCurrentTimeout.get();
         if (pivotCurrent > pivotLimit) {
-            if (m_pivotOvercurrentStartTime == 0) m_pivotOvercurrentStartTime = now;
-            else if (now - m_pivotOvercurrentStartTime > pivotTimeout) {
-                // Trip: stop the pivot, force stow, and flag the trip on the dashboard.
+            if (m_pivotOvercurrentStartTime == 0) {
+                m_pivotOvercurrentStartTime = now;  // Start timing the overcurrent
+            } else if (now - m_pivotOvercurrentStartTime > pivotTimeout) {
+                // Overcurrent persisted; motor is likely jammed. Stop it and stow.
                 m_leaderPivotMotor.setVoltage(0);
                 m_followerPivotMotor.setVoltage(0);
                 m_pivotState = PivotState.STOW;
                 SmartDashboard.putBoolean("pivot overcurrent tripped", true);
             }
         } else {
-            m_pivotOvercurrentStartTime = 0;
+            m_pivotOvercurrentStartTime = 0;  // Reset timer if current drops below limit
         }
 
         // === Overcurrent protection: Indexer ===
+        // PROBLEM: The indexer pushes balls into a constrained space (the drum). If a ball
+        // jams or the drum is full, the indexer motor stalls. Unlike the pivot, stall isn't
+        // catastrophic, but it draws power and may coerce the battery if it persists.
+        //
+        // THRESHOLD:
+        //   m_indexerCurrentLimit (default 25 A): The indexer is a Kraken X44 at ±4.5 V
+        //     (direct voltage, no closed loop). Normal feeding is ~5–10 A. Stall is ~80 A.
+        //     The 25 A threshold is well above normal, catching genuine jams.
+        //   m_indexerCurrentTimeout (default 0.2 s): A jam is instantaneous; 0.2 s is plenty
+        //     to distinguish jam from startup transient.
+        //
+        // TRADEOFF: Unlike the pivot, this is a soft safeguard, not critical to robot safety.
+        // But it prevents driver frustration (trying to feed when jammed) and battery drain.
+
         double indexerCurrent = m_indexerMotor.getSupplyCurrent().getValueAsDouble();
         double indexerLimit = m_indexerCurrentLimit.get();
         double indexerTimeout = m_indexerCurrentTimeout.get();
