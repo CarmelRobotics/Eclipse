@@ -19,6 +19,7 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -324,19 +325,32 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
-        // === Vision-direct positioning (Limelight is the pose source) ===
-        // Whenever the camera sees at least one tag, the robot pose is snapped straight
-        // to the vision estimate: vision XY + current gyro heading. No Kalman fusion, no
-        // outlier gating -- what the Limelight says is where we are.
+        // === Vision localization: snap when lost, fuse when tracking ===
+        // Two regimes, split by how far the vision estimate is from the current pose:
         //
-        // Always read the BLUE-origin botpose regardless of alliance. Everything else in
-        // this codebase (Field2d, hub positions, trench Y bounds, PathPlanner) uses the
-        // WPILib always-blue-origin convention, so red-origin botpose would be mirrored
-        // ~16 m away. Alliance only affects driver perspective and which hub we target.
+        //   FAR OFF (> kMaxVisionCorrectionMeters): the pose is simply wrong (startup,
+        //   robot carried, odometry ran blind too long). Snap: resetPose to vision XY +
+        //   gyro heading. Fusing here would take seconds to converge; snapping is right.
         //
-        // NOTE: the pose is reset imperatively with resetPose(). Do NOT route this through
-        // a Command-returning helper -- an unscheduled Command silently does nothing (this
-        // exact bug shipped twice: lintake stow, then vision seeding).
+        //   CLOSE (<= threshold): normal tracking. Feed the estimate into the built-in
+        //   Kalman filter (addVisionMeasurement) instead of hard-resetting. The filter
+        //   blends vision with wheel odometry, which does two important things:
+        //     1. Smooths single-tag botpose jitter so the aim target doesn't vibrate.
+        //     2. Absorbs the garbage frames the camera produces right as a tag leaves
+        //        the FOV (edge distortion + motion blur while rotating). A hard reset on
+        //        one of those stranded the pose wrong just as vision went blind -- which
+        //        is exactly when odometry needs a good starting point to carry the aim.
+        //
+        //   NO TAGS: odometry carries the pose from the last good fusion, so aiming
+        //   keeps working when the tag leaves view (it drifts slowly, ~cm/s, vs. being
+        //   frozen or wrong).
+        //
+        // Always read the BLUE-origin botpose regardless of alliance -- everything else
+        // here (Field2d, hub positions, trench bounds, PathPlanner) is blue-origin.
+        //
+        // NOTE: pose changes go through resetPose()/addVisionMeasurement() imperatively.
+        // Do NOT route them through a Command-returning helper -- an unscheduled Command
+        // silently does nothing (that bug shipped twice: lintake stow, vision seeding).
         boolean hubVisible = false;
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
             // Give the camera our heading + yaw rate (needed if we ever switch to MegaTag2;
@@ -351,25 +365,32 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 LimelightHelpers.getBotPoseEstimate_wpiBlue(limelight.name());
 
             if (estimate == null || estimate.tagCount == 0) {
-                continue;  // No tags in view; keep the last pose (odometry carries it)
+                continue;  // No tags in view; odometry carries the pose
             }
             hubVisible = true;
 
-            // Vision XY, gyro heading. Vision heading jitters a few degrees frame to
-            // frame; the Pigeon is far more stable, so it keeps owning rotation.
-            //
-            // 3 cm deadband: single-tag botpose jitters a centimeter or two between
-            // frames even when the robot is bolted still. Resetting the pose with that
-            // noise makes the aim target vibrate (which the heading controller then
-            // chases). Inside the deadband, odometry carries the pose smoothly.
             double visionDelta = estimate.pose.getTranslation()
                 .getDistance(getState().Pose.getTranslation());
-            if (visionDelta > 0.03) {
+
+            if (visionDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
+                // Grossly off: snap to vision XY, keep the gyro's heading (vision heading
+                // jitters a few degrees; the Pigeon is far more stable).
                 resetPose(new Pose2d(
                     estimate.pose.getTranslation(),
                     getState().Pose.getRotation()
                 ));
                 m_visionPoseResets++;
+            } else {
+                // Tracking: fuse. Trust falls off with tag distance -- close tags give
+                // centimeter-level solutions, far single tags wander. sigma = 0.05 + 0.02*d^2
+                // (0.07 m at 1 m, 0.13 m at 2 m, 0.37 m at 4 m). Heading sigma is infinite:
+                // the Pigeon owns rotation.
+                double xyStdDev = 0.05 + 0.02 * estimate.avgTagDist * estimate.avgTagDist;
+                addVisionMeasurement(
+                    estimate.pose,
+                    estimate.timestampSeconds,
+                    VecBuilder.fill(xyStdDev, xyStdDev, Double.MAX_VALUE)
+                );
             }
 
             // Raw vision diagnostics -- compare these against where the robot actually is.

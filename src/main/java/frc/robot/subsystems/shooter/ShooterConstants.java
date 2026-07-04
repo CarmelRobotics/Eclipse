@@ -181,15 +181,21 @@ public final class ShooterConstants {
         ScorePivotPositionByDistance.put(2.5, 0.027);
         ScorePivotPositionByDistance.put(3.5, 0.038);
         ScorePivotPositionByDistance.put(4.5, 0.045);
+        ScorePivotPositionByDistance.put(5.0, 0.048);  // table must cover the 5 m range gate
 
-        // Flywheel speed (RPS) by distance. These are baseline vacuum values; expect to
-        // trim up 10–25% on the field via the RpsOffset dashboard key. The spread from
-        // 1.5 m (25 RPS) to 4.5 m (32.8 RPS) reflects the increasing angle and the fact
-        // that at distance the ball must overcome more drag.
-        ScoreShooterRpsByDistance.put(1.5, 25.0);
-        ScoreShooterRpsByDistance.put(2.5, 27.6);
-        ScoreShooterRpsByDistance.put(3.5, 30.2);
-        ScoreShooterRpsByDistance.put(4.5, 32.8);
+        // Flywheel speed (RPS) by distance. FIELD-CALIBRATED 2026-07-04: a flat +4.5 RPS
+        // trim over the vacuum baseline landed midrange but left long range short -- the
+        // drag deficit grows with distance, so the curve needs slope, not offset. The
+        // +4.5 is baked in flat through 3.5 m (confirmed good), and the 4.5-5.0 m entries
+        // carry progressively more on top (~+2 / +3 extra) to cover drag. Long end is an
+        // estimate: re-verify at 4.5 m and trim with ShooterRpsOffset, then re-bake.
+        // NOTE: after this table change, ShotTuning/ShooterRpsOffset on the dashboard
+        // must go back to 0 or the trim gets double-counted.
+        ScoreShooterRpsByDistance.put(1.5, 29.5);
+        ScoreShooterRpsByDistance.put(2.5, 32.1);
+        ScoreShooterRpsByDistance.put(3.5, 34.7);
+        ScoreShooterRpsByDistance.put(4.5, 39.5);
+        ScoreShooterRpsByDistance.put(5.0, 42.0);
 
         // Time-of-flight (seconds) by distance. Used by the drivetrain for motion
         // compensation (where will the hub be when the ball arrives?). These are computed
@@ -200,6 +206,7 @@ public final class ShooterConstants {
         ShotTimeOfFlightSecondsByDistance.put(2.5, 0.77);
         ShotTimeOfFlightSecondsByDistance.put(3.5, 0.88);
         ShotTimeOfFlightSecondsByDistance.put(4.5, 0.99);
+        ShotTimeOfFlightSecondsByDistance.put(5.0, 1.05);
     }
 
     public static double getScorePivotPosition(double distanceMeters) {
