@@ -6,6 +6,7 @@ package frc.robot;
 
 import dev.doglog.DogLog;
 import dev.doglog.DogLogOptions;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
@@ -27,12 +28,26 @@ public class Robot extends TimedRobot {
     // dashboard edit can't change gains or offsets mid-match.
     LoggedTunableNumber.setTuningMode(true);
 
+    // Brownout guard: on a roboRIO 2 this lets the controller ride battery sag down to
+    // 6.0 V instead of cutting outputs at the 6.75 V default -- transient dips during a
+    // full-power shot-while-driving stay survivable. (No-op on a RIO 1.)
+    try {
+      RobotController.setBrownoutVoltage(6.0);
+    } catch (Exception e) {
+      // RIO 1 or unsupported image; the default threshold applies.
+    }
+
     m_robotContainer = new RobotContainer();
   }
 
   @Override
   public void robotPeriodic() {
     CommandScheduler.getInstance().run();
+
+    // Battery health in every log: if shots start missing low or the robot stutters,
+    // check these traces first -- sag is invisible on the dashboard after the fact.
+    DogLog.log("Battery/Voltage", RobotController.getBatteryVoltage());
+    DogLog.log("Battery/BrownedOut", RobotController.isBrownedOut());
   }
 
   @Override

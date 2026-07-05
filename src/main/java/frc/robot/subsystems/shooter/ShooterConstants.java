@@ -319,12 +319,15 @@ public final class ShooterConstants {
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
             .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS).withKA(.2);
 
-        // Supply limit protects the bus voltage (and the main breaker) during the shot
-        // current spike -- this is what most directly helps VelocityVoltage hold speed,
-        // since it keeps battery sag from eating the voltage command. Stator limit is
-        // kept generous so recovery torque is never the bottleneck.
+        // Supply limit protects the bus voltage (and the main breaker) during spin-up and
+        // shot spikes -- this is what most directly helps VelocityVoltage hold speed,
+        // since it keeps battery sag from eating the voltage command. 35 A x 4 motors
+        // caps the flywheel at 140 A of battery draw (was 200 A at 50 each, which
+        // stacked with an unlimited drivetrain into brownout territory). Spin-up gets a
+        // touch slower; the 1.25 s / 2 s shot timeouts already cover it. Stator limit is
+        // kept generous so recovery torque during the shot is never the bottleneck.
         private static final CurrentLimitsConfigs CurrentLimits = new CurrentLimitsConfigs()
-            .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(50)
+            .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(35)
             .withStatorCurrentLimitEnable(true).withStatorCurrentLimit(100);
     }
 
@@ -339,12 +342,23 @@ public final class ShooterConstants {
             .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
     }
 
+    // Hardware supply caps for the small mechanisms (brownout budget). These sit above
+    // the software overcurrent trips (pivot 40 A/0.25 s watches stall; indexer 25 A),
+    // so the soft trips keep their diagnostic role while the hardware cap bounds what
+    // the battery can ever see.
+    private static final CurrentLimitsConfigs PivotCurrentLimits = new CurrentLimitsConfigs()
+        .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
+    private static final CurrentLimitsConfigs IndexerCurrentLimits = new CurrentLimitsConfigs()
+        .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
+
     public static final TalonFXConfiguration LeaderPivotConfig = new TalonFXConfiguration()
         .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs)
+        .withCurrentLimits(PivotCurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
-    
+
     public static final TalonFXConfiguration FollowerPivotConfig = new TalonFXConfiguration()
         .withSlot0(PivotConfigs.Slot0Configs).withMotionMagic(PivotConfigs.MotionMagicConfigs)
+        .withCurrentLimits(PivotCurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
     public static final TalonFXConfiguration LeftShooterConfig = new TalonFXConfiguration()
@@ -354,7 +368,8 @@ public final class ShooterConstants {
         .withSlot0(ShooterConfigs.Slot0Configs).withCurrentLimits(ShooterConfigs.CurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
-    public static final TalonFXConfiguration IndexerConfig = new TalonFXConfiguration().withSlot0(IndexerConfigs.Slot0Configs);
+    public static final TalonFXConfiguration IndexerConfig = new TalonFXConfiguration()
+        .withSlot0(IndexerConfigs.Slot0Configs).withCurrentLimits(IndexerCurrentLimits);
 
     public enum PivotState {
         STOW,

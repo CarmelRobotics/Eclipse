@@ -1,5 +1,6 @@
 package frc.robot.subsystems.lintake;
 
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
@@ -51,14 +52,23 @@ public final class LintakeConstants {
             .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
     }
     
+    // Brownout budget: neither the pinions nor the roller had ANY current limit, and the
+    // shooting-time agitation pump accelerates both pinions every 0.3 s. 30 A supply each
+    // bounds the whole intake at ~90 A worst case without slowing normal moves.
+    private static final CurrentLimitsConfigs kIntakeCurrentLimits = new CurrentLimitsConfigs()
+        .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
+
     public static final TalonFXConfiguration LeaderPinionConfig = new TalonFXConfiguration()
         .withSlot0(PinionConfigs.Slot0Configs).withMotionMagic(PinionConfigs.MotionMagicConfigs)
+        .withCurrentLimits(kIntakeCurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
     public static final TalonFXConfiguration FollowerPinionConfig = new TalonFXConfiguration()
         .withSlot0(PinionConfigs.Slot0Configs).withMotionMagic(PinionConfigs.MotionMagicConfigs)
+        .withCurrentLimits(kIntakeCurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
-    public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration().withSlot0(RollerConfigs.Slot0Configs);
+    public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration()
+        .withSlot0(RollerConfigs.Slot0Configs).withCurrentLimits(kIntakeCurrentLimits);
 
     public enum PinionState {
         STOW(-4),
