@@ -446,6 +446,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("pass/target x", passTarget.getX());
         SmartDashboard.putNumber("pass/target y", passTarget.getY());
         SmartDashboard.putNumber("pass/distance", getPassDistance());
+        // What a right-trigger pull would do right now (the choice latches at the pull).
+        SmartDashboard.putString("aim/auto mode",
+            getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters ? "HUB" : "PASS");
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
         String gameData = DriverStation.getGameSpecificMessage();

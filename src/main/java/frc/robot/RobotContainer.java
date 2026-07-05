@@ -185,10 +185,22 @@ public class RobotContainer {
     m_controller.a().whileTrue(
         m_drivetrain.faceHubCommand(this::driverXVelocity, this::driverYVelocity)
     );
+    // Right trigger: context-aware score. Inside hub range (5 m) -> full hub shot;
+    // beyond it -> smart pass to the alliance-zone corner. The choice LATCHES at the
+    // moment the trigger is pulled so the mode can't flip mid-hold at the range
+    // boundary; release and re-pull to re-decide. "aim/auto mode" on the dashboard
+    // shows live which mode a pull would pick.
     m_controller.rightTrigger().whileTrue(
-        Commands.parallel(
-            m_drivetrain.faceHubCommand(this::driverXVelocity, this::driverYVelocity),
-            heldShotCommand(PivotState.SCORE, ShooterState.SCORE)
+        Commands.either(
+            Commands.parallel(
+                m_drivetrain.faceHubCommand(this::driverXVelocity, this::driverYVelocity),
+                heldShotCommand(PivotState.SCORE, ShooterState.SCORE)
+            ),
+            Commands.parallel(
+                m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity),
+                heldPassCommand()
+            ),
+            () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
         )
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
