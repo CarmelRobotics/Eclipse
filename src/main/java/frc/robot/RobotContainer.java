@@ -52,17 +52,27 @@ public class RobotContainer {
   // translation locked to the axis you're facing) and a NEAR halo around it (assist as
   // a suggestion: heading snaps only while the driver isn't rotating, translation free).
   //
-  // MEASURE THESE ON THE REAL FIELD. The Y thresholds came from the trench walls
-  // (~7.62 / ~0.38 m); the X spans and the tower footprint are estimates from field
-  // drawings -- drive to each corner and read the pose off the Field2d widget.
-  private static final double kTrenchXMin = 5.6;
-  private static final double kTrenchXMax = 10.9;
-  private static final double kLeftTrenchYMin = 7.3;
-  private static final double kRightTrenchYMax = 0.7;
-  private static final double kTowerXMin = 7.1;
-  private static final double kTowerXMax = 9.5;
-  private static final double kTowerYMin = 2.9;
-  private static final double kTowerYMax = 5.2;
+  // Geometry from the official 2026-rebuilt-welded AprilTag layout + game manual:
+  //   - Each alliance's barrier line (guardrail-trench-bump-hub-bump-trench-guardrail)
+  //     is 47 in deep in X; the hub face tags give the spans exactly (blue 4.022-5.229,
+  //     red 11.312-12.519). Trench drive-under corridors are the 65.65 in (1.668 m)
+  //     of that line nearest each guardrail; field width is 8.069 m.
+  //   - Towers sit ON the alliance walls between DS2/DS3: 49.25 in wide, base reaching
+  //     39 in onto the field. Wall tag midpoints give the centers (blue y 3.962,
+  //     red y 4.108).
+  private static final double kFieldWidth = 8.069;
+  private static final double kFieldLength = 16.541;
+  private static final double kBlueLineXMin = 4.02;
+  private static final double kBlueLineXMax = 5.23;
+  private static final double kRedLineXMin = 11.31;
+  private static final double kRedLineXMax = 12.52;
+  private static final double kTrenchDepthFromWall = 1.668;   // 65.65 in
+  private static final double kLeftTrenchYMin = kFieldWidth - kTrenchDepthFromWall;  // 6.40
+  private static final double kRightTrenchYMax = kTrenchDepthFromWall;
+  private static final double kTowerReachX = 0.99;            // 39 in off the alliance wall
+  private static final double kTowerHalfWidthY = 0.63;        // 49.25 in / 2
+  private static final double kBlueTowerCenterY = 3.962;
+  private static final double kRedTowerCenterY = 4.108;
   // Width of the "suggestion" halo around each structure.
   private static final double kAssistNearMargin = 0.8;
   // Re-snap to a different 90-degree increment only after rotating this far past the
@@ -207,20 +217,30 @@ public class RobotContainer {
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when
-  // both could apply; trench beats tower (they shouldn't overlap anyway).
+  // both could apply; trench beats tower (they don't overlap on the real field).
   private AssistZone currentAssistZone() {
     var pose = m_drivetrain.getState().Pose;
     double x = pose.getX();
     double y = pose.getY();
 
-    boolean trenchIn = (y >= kLeftTrenchYMin || y <= kRightTrenchYMax)
-        && x >= kTrenchXMin && x <= kTrenchXMax;
-    boolean trenchNear = (y >= kLeftTrenchYMin - kAssistNearMargin || y <= kRightTrenchYMax + kAssistNearMargin)
-        && x >= kTrenchXMin - kAssistNearMargin && x <= kTrenchXMax + kAssistNearMargin;
-    boolean towerIn = x >= kTowerXMin && x <= kTowerXMax
-        && y >= kTowerYMin && y <= kTowerYMax;
-    boolean towerNear = x >= kTowerXMin - kAssistNearMargin && x <= kTowerXMax + kAssistNearMargin
-        && y >= kTowerYMin - kAssistNearMargin && y <= kTowerYMax + kAssistNearMargin;
+    // Trench corridors: on either barrier line in X, within trench depth of either wall.
+    boolean trenchX = (x >= kBlueLineXMin && x <= kBlueLineXMax)
+        || (x >= kRedLineXMin && x <= kRedLineXMax);
+    boolean trenchNearX = (x >= kBlueLineXMin - kAssistNearMargin && x <= kBlueLineXMax + kAssistNearMargin)
+        || (x >= kRedLineXMin - kAssistNearMargin && x <= kRedLineXMax + kAssistNearMargin);
+    boolean trenchIn = trenchX && (y >= kLeftTrenchYMin || y <= kRightTrenchYMax);
+    boolean trenchNear = trenchNearX
+        && (y >= kLeftTrenchYMin - kAssistNearMargin || y <= kRightTrenchYMax + kAssistNearMargin);
+
+    // Towers: against either alliance wall, centered on that wall's tower.
+    boolean towerIn =
+        (x <= kTowerReachX && Math.abs(y - kBlueTowerCenterY) <= kTowerHalfWidthY)
+        || (x >= kFieldLength - kTowerReachX && Math.abs(y - kRedTowerCenterY) <= kTowerHalfWidthY);
+    boolean towerNear =
+        (x <= kTowerReachX + kAssistNearMargin
+            && Math.abs(y - kBlueTowerCenterY) <= kTowerHalfWidthY + kAssistNearMargin)
+        || (x >= kFieldLength - kTowerReachX - kAssistNearMargin
+            && Math.abs(y - kRedTowerCenterY) <= kTowerHalfWidthY + kAssistNearMargin);
 
     AssistZone zone = trenchIn ? AssistZone.TRENCH_IN
         : towerIn ? AssistZone.TOWER_IN
@@ -290,16 +310,36 @@ public class RobotContainer {
     );
   }
 
+  // === Lintake agitation pump ===
+  // While a shot runs, bounce the pinion between AGITATE and GROUND so the fuel pile
+  // keeps flowing into the indexer instead of bridging over it (30 balls in a hopper
+  // pack together fast once the bottom layer drains). Deliberately requirement-free:
+  // it only writes the pinion state, so the roller command (left trigger) and the
+  // shot command keep running alongside it without cancelling anything. The pinion is
+  // left deployed wherever the pump ends; the bumpers still own stow/deploy.
+  private Command lintakePumpCommand() {
+    return Commands.sequence(
+        Commands.runOnce(() -> m_lintake.setPinionState(PinionState.AGITATE)),
+        Commands.waitSeconds(0.3),
+        Commands.runOnce(() -> m_lintake.setPinionState(PinionState.GROUND)),
+        Commands.waitSeconds(0.3)
+    ).repeatedly();
+  }
+
   // === Timed shot (autonomous) ===
   // Shot sequence: prepare (set pivot + spin up) → wait until readyToShoot() OR 1.25 s
   // timeout expires (whichever first) → feed for feedSeconds. The timeout ensures shots
   // never hang with the flywheel running forever; after the timeout, feed unconditionally.
+  // The lintake pump runs alongside the whole sequence and dies with it (deadline).
   // finallyDo() guarantees motors stop even if the command is interrupted mid-sequence.
   private Command timedShotCommand(PivotState pivotState, ShooterState shooterState, double feedSeconds) {
-    return Commands.sequence(
-        prepareShotCommand(pivotState, shooterState),
-        Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-        Commands.run(this::feed, m_shooter).withTimeout(feedSeconds)
+    return Commands.deadline(
+        Commands.sequence(
+            prepareShotCommand(pivotState, shooterState),
+            Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
+            Commands.run(this::feed, m_shooter).withTimeout(feedSeconds)
+        ),
+        lintakePumpCommand()
     ).finallyDo(interrupted -> stopShooter());
   }
 
@@ -308,10 +348,13 @@ public class RobotContainer {
   // released by the driver (no withTimeout on feed). Still uses readyToShoot/timeout so
   // the shot can't hang mid-spin.
   private Command heldShotCommand(PivotState pivotState, ShooterState shooterState) {
-    return Commands.sequence(
-        prepareShotCommand(pivotState, shooterState),
-        Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-        Commands.run(this::feed, m_shooter)
+    return Commands.deadline(
+        Commands.sequence(
+            prepareShotCommand(pivotState, shooterState),
+            Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
+            Commands.run(this::feed, m_shooter)
+        ),
+        lintakePumpCommand()
     ).finallyDo(interrupted -> stopShooter());
   }
 
