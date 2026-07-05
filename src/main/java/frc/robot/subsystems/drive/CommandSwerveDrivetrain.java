@@ -69,6 +69,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private final LoggedTunableNumber m_headingOffsetDeg =
         new LoggedTunableNumber("ShotTuning/HeadingOffsetDeg", 0);
 
+    // Which side of the field the pass target sits on, with 0.5 m of hysteresis around
+    // the centerline so the target (and the heading lock chasing it) can't flicker
+    // between corners while driving down the middle.
+    private boolean m_passHighSide = false;
+
     // --- Shoot-on-the-move solution state (computed once per loop in periodic) ---
     // Velocity lead is low-pass filtered and scaled by MoveCompGain: 1.0 = full physics
     // lead, 0 = aim as if stationary. 0.7 default deliberately under-leads -- the target
@@ -417,6 +422,14 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // readyToShoot, the shooter's table lookups -- reads this cached solution.
         updateShotSolution();
 
+        // Update which side of the field the pass corner is on (0.5 m hysteresis band).
+        double poseY = getState().Pose.getY();
+        if (m_passHighSide && poseY < ShooterConstants.kFieldWidthMeters / 2.0 - 0.5) {
+            m_passHighSide = false;
+        } else if (!m_passHighSide && poseY > ShooterConstants.kFieldWidthMeters / 2.0 + 0.5) {
+            m_passHighSide = true;
+        }
+
         // === Dashboard diagnostics ===
         m_field.setRobotPose(getState().Pose);
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
@@ -429,6 +442,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("aim/target hub x", targetHub.getX());
         SmartDashboard.putNumber("aim/target hub y", targetHub.getY());
         SmartDashboard.putNumber("aim/hub heading deg", getHubHeading().getDegrees());
+        Translation2d passTarget = getPassTarget();
+        SmartDashboard.putNumber("pass/target x", passTarget.getX());
+        SmartDashboard.putNumber("pass/target y", passTarget.getY());
+        SmartDashboard.putNumber("pass/distance", getPassDistance());
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
         String gameData = DriverStation.getGameSpecificMessage();
@@ -635,6 +652,50 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             .withDeadband(Constants.kMaxSpeed * 0.1)
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
             .withTargetDirection(getHubHeading())
+        );
+    }
+
+    // === Passing target ===
+    // Ferry landing point: the alliance-zone corner on whichever side of the field the
+    // robot is currently on (left side -> left corner, right side -> right corner, with
+    // hysteresis at the centerline), inset from the walls so balls land in the zone
+    // instead of ricocheting off the corner. Own alliance end comes from the DS setting.
+    public Translation2d getPassTarget() {
+        boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        double x = red
+            ? ShooterConstants.kFieldLengthMeters - ShooterConstants.kPassCornerInsetMeters
+            : ShooterConstants.kPassCornerInsetMeters;
+        double y = m_passHighSide
+            ? ShooterConstants.kFieldWidthMeters - ShooterConstants.kPassCornerInsetMeters
+            : ShooterConstants.kPassCornerInsetMeters;
+        return new Translation2d(x, y);
+    }
+
+    public double getPassDistance() {
+        return getPassTarget().getDistance(getState().Pose.getTranslation());
+    }
+
+    // Pass aim is a straight bearing to the landing corner (no motion lead: a pass lands
+    // in a zone, not a hub opening). The same mechanical heading trim applies.
+    public Rotation2d getPassHeading() {
+        return getPassTarget().minus(getState().Pose.getTranslation()).getAngle()
+            .plus(Rotation2d.fromDegrees(m_headingOffsetDeg.get()));
+    }
+
+    public Rotation2d getPassHeadingError() {
+        return Rotation2d.fromRadians(
+            MathUtil.angleModulus(getPassHeading().minus(getState().Pose.getRotation()).getRadians())
+        );
+    }
+
+    // Heading-locked drive toward the pass corner; driver keeps translation control.
+    public Command facePassTargetCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity) {
+        return applyRequest(() -> snapRequest
+            .withVelocityX(xVelocity.get())
+            .withVelocityY(yVelocity.get())
+            .withDeadband(Constants.kMaxSpeed * 0.1)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
+            .withTargetDirection(getPassHeading())
         );
     }
 

@@ -28,6 +28,20 @@ public final class ShooterConstants {
     public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
     public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
 
+    // Field bounds from the official 2026-rebuilt-welded AprilTag layout.
+    public static final double kFieldLengthMeters = 16.541;
+    public static final double kFieldWidthMeters = 8.069;
+
+    // ===== Passing (ferry to the alliance zone) =====
+    // Pass landing targets are the alliance-zone corners, inset from the walls so the
+    // ball lands in the zone instead of bouncing off the corner plating.
+    public static final double kPassCornerInsetMeters = 1.5;
+    // Wider aim tolerance than hub shots: a pass lands in a ~2 m zone, not a 0.6 m hub.
+    public static final double kPassHeadingToleranceDegrees = 10.0;
+    // Passes command up to ~60 RPS; spin-up from idle takes longer than a hub shot's.
+    public static final double kPassSpinupTimeoutSeconds = 2.0;
+    public static final String kPassRpsOffsetKey = "ShotTuning/PassRpsOffset";
+
     // ===== Shooter fixed states =====
     public static final double kIdleShooterRps = 6.7;        // wheel spinning slowly while coasting
     public static final double kLobShooterRps = 40;          // ferry shot (slower pass through field)
@@ -129,6 +143,7 @@ public final class ShooterConstants {
     private static final InterpolatingDoubleTreeMap ScorePivotPositionByDistance = new InterpolatingDoubleTreeMap();
     private static final InterpolatingDoubleTreeMap ScoreShooterRpsByDistance = new InterpolatingDoubleTreeMap();
     private static final InterpolatingDoubleTreeMap ShotTimeOfFlightSecondsByDistance = new InterpolatingDoubleTreeMap();
+    private static final InterpolatingDoubleTreeMap PassRpsByDistance = new InterpolatingDoubleTreeMap();
 
     static {
         // === Physics-derived shot tables (minimum-energy trajectories) ===
@@ -231,6 +246,18 @@ public final class ShooterConstants {
         ShotTimeOfFlightSecondsByDistance.put(3.5, 0.73);
         ShotTimeOfFlightSecondsByDistance.put(4.5, 0.83);
         ShotTimeOfFlightSecondsByDistance.put(5.0, 0.87);
+
+        // Pass power by distance to the landing target. Same calibrated model as the hub
+        // tables: launch is the LOB pivot (~45 deg from the hood model), ground-to-ground
+        // range solved from ballistics with a 0.305 m release height, ball speed converted
+        // to wheel RPS with the field-calibrated x1.30 factor. Untested on the field --
+        // trim globally with ShotTuning/PassRpsOffset, then re-bake like the hub tables.
+        PassRpsByDistance.put(3.0, 28.0);
+        PassRpsByDistance.put(5.0, 37.0);
+        PassRpsByDistance.put(7.0, 44.0);
+        PassRpsByDistance.put(9.0, 50.0);
+        PassRpsByDistance.put(11.0, 56.0);
+        PassRpsByDistance.put(13.0, 61.0);
     }
 
     public static double getScorePivotPosition(double distanceMeters) {
@@ -243,6 +270,10 @@ public final class ShooterConstants {
 
     public static double getShotTimeOfFlightSeconds(double distanceMeters) {
         return ShotTimeOfFlightSecondsByDistance.get(distanceMeters);
+    }
+
+    public static double getPassRps(double distanceMeters) {
+        return PassRpsByDistance.get(distanceMeters);
     }
 
     private static final class PivotConfigs {
@@ -330,8 +361,9 @@ public final class ShooterConstants {
     public enum ShooterState {
         ZERO,
         SCORE,
-        LOB,
-        SEND,
+        PASS,     // distance-interpolated ferry to the alliance-zone corner
+        LOB,      // legacy fixed-speed ferry (kLobShooterRps)
+        SEND,     // fixed-speed long ferry (kSendShooterRps)
         REVERSE;  // Back out a jammed ball at -10 RPS
     }
 

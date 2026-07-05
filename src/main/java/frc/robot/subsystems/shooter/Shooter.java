@@ -69,6 +69,7 @@ public class Shooter extends SubsystemBase {
     private IndexerState m_indexerState = IndexerState.ZERO;
     private double m_targetPivotPosition = ShooterConstants.kStowPivotPosition;  // in output (pivot) rotations
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
+    private double m_targetPassRps = 30;  // distance-interpolated ferry speed
 
     // ===== Protection =====
     // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
@@ -84,6 +85,7 @@ public class Shooter extends SubsystemBase {
     // without code changes, so field tuning is a few dashboard edits away.
     private final LoggedTunableNumber m_pivotOffset = new LoggedTunableNumber(ShooterConstants.kPivotOffsetKey, 0);
     private final LoggedTunableNumber m_shooterRpsOffset = new LoggedTunableNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
+    private final LoggedTunableNumber m_passRpsOffset = new LoggedTunableNumber(ShooterConstants.kPassRpsOffsetKey, 0);
     private final LoggedTunableNumber m_shotBlockPivotPosition = new LoggedTunableNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
     private final LoggedTunableNumber m_pivotCurrentLimit = new LoggedTunableNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
     private final LoggedTunableNumber m_pivotCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
@@ -278,6 +280,29 @@ public class Shooter extends SubsystemBase {
         return shotInRange && aimed && shooterReady && pivotReady;
     }
 
+    // Pass readiness: unlike readyToShoot(), this gates on the PASS targets -- flywheel
+    // at the distance-interpolated ferry speed, pivot at the LOB (max feed) angle, and
+    // heading within the wider pass tolerance of the landing-corner bearing. This is
+    // what lets passes fire on actual spin-up instead of a blind timeout.
+    public boolean readyToPass() {
+        boolean spunUp = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetPassRps)
+            <= ShooterConstants.kShooterReadyToleranceRps;
+        double currentPivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        boolean pivotReady = Math.abs(currentPivotOutputRot - ShooterConstants.kLobPivotPosition)
+            <= ShooterConstants.kPivotReadyToleranceRotations;
+        boolean aimed = Math.abs(m_drive.getPassHeadingError().getDegrees())
+            <= ShooterConstants.kPassHeadingToleranceDegrees;
+
+        SmartDashboard.putBoolean("ready/pass spun up", spunUp);
+        SmartDashboard.putBoolean("ready/pass aimed", aimed);
+        SmartDashboard.putBoolean("ready/pass pivot", pivotReady);
+        DogLog.log("Shooter/Ready/PassSpunUp", spunUp);
+        DogLog.log("Shooter/Ready/PassAimed", aimed);
+        DogLog.log("Shooter/Ready/PassPivot", pivotReady);
+
+        return spunUp && pivotReady && aimed;
+    }
+
     @Override
     public void periodic() {
         // === Update shot targets from drivetrain compensation ===
@@ -287,6 +312,7 @@ public class Shooter extends SubsystemBase {
         double shotDistance = m_drive.getShotDistance();
         m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
         m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
+        m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
 
         // === Live flywheel gain re-tuning ===
         // Check each gain independently for changes (don't use || short-circuit; each
@@ -331,10 +357,11 @@ public class Shooter extends SubsystemBase {
         // variable so shot detection below can measure actual vs. commanded to detect
         // the velocity dip when a ball passes through.
         double commandedRps = switch (m_shooterState) {
-            case ZERO -> ShooterConstants.kIdleShooterRps;  // 0.5 RPS idle
-            case SCORE -> m_targetShooterRps;                // distance-dependent
-            case LOB -> ShooterConstants.kLobShooterRps;     // ferry shot at fixed 40 RPS
-            case SEND -> ShooterConstants.kSendShooterRps;   // long ferry at fixed 90 RPS
+            case ZERO -> ShooterConstants.kIdleShooterRps;  // idle spin (6.7 RPS)
+            case SCORE -> m_targetShooterRps;                // hub shot, distance-dependent
+            case PASS -> m_targetPassRps;                    // ferry, distance-dependent
+            case LOB -> ShooterConstants.kLobShooterRps;     // legacy fixed 40 RPS ferry
+            case SEND -> ShooterConstants.kSendShooterRps;   // fixed 90 RPS long ferry
             case REVERSE -> -10.0;                           // jam clearance: slow reverse
         };
         // While a SysId routine is running, skip normal control so the characterization

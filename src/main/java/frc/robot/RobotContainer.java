@@ -146,9 +146,10 @@ public class RobotContainer {
     assistSnapRequest.HeadingController.setPID(8, 0, 0.2);
     assistSnapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    // Aiming outranks the assist: while right-trigger or A is held, faceHubCommand owns
-    // the drivetrain (so you can pop out of the trench and immediately shoot).
-    Trigger aimHeld = m_controller.rightTrigger().or(m_controller.a());
+    // Aiming outranks the assist: while right-trigger / A (hub aim) or POV-up (pass aim)
+    // is held, the aim command owns the drivetrain (so you can pop out of the trench and
+    // immediately shoot or ferry).
+    Trigger aimHeld = m_controller.rightTrigger().or(m_controller.a()).or(m_controller.povUp());
     Trigger assistActive = new Trigger(() -> currentAssistZone() != AssistZone.NONE)
         .and(aimHeld.negate());
 
@@ -204,9 +205,16 @@ public class RobotContainer {
             m_shooter, m_lintake
         )
     );
+    // Smart pass: heading-locks to the alliance-zone corner on the robot's current side
+    // of the field, spins to the distance-interpolated ferry speed, and feeds once
+    // actually spun up + aimed (2 s force-feed backstop).
     m_controller.povUp().whileTrue(
-        heldShotCommand(PivotState.LOB, ShooterState.LOB)
+        Commands.parallel(
+            m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity),
+            heldPassCommand()
+        )
     );
+    // Manual flat-out ferry kept as a fallback (fixed 90 RPS, no aim assist).
     m_controller.povRight().whileTrue(
         heldShotCommand(PivotState.LOB, ShooterState.SEND)
     );
@@ -352,6 +360,22 @@ public class RobotContainer {
         Commands.sequence(
             prepareShotCommand(pivotState, shooterState),
             Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
+            Commands.run(this::feed, m_shooter)
+        ),
+        lintakePumpCommand()
+    ).finallyDo(interrupted -> stopShooter());
+  }
+
+  // === Held pass (teleop) ===
+  // Same shape as heldShotCommand, but gated on readyToPass() -- flywheel at the
+  // distance-interpolated ferry speed, pivot at max feed, aimed at the pass corner --
+  // so passes fire on actual spin-up. Longer timeout backstop: ferry speeds are higher,
+  // so spin-up takes longer than a hub shot's.
+  private Command heldPassCommand() {
+    return Commands.deadline(
+        Commands.sequence(
+            prepareShotCommand(PivotState.LOB, ShooterState.PASS),
+            Commands.waitUntil(m_shooter::readyToPass).withTimeout(ShooterConstants.kPassSpinupTimeoutSeconds),
             Commands.run(this::feed, m_shooter)
         ),
         lintakePumpCommand()
