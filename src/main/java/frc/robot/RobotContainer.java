@@ -42,20 +42,36 @@ public class RobotContainer {
       .withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
       .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
-  // Shared snap request for trench heading lock.
-  // Reused every loop to avoid allocations; PID configured once in configureBindings().
-  private final SwerveRequest.FieldCentricFacingAngle trenchSnapRequest =
+  // Shared heading-locked request for the driver assists (trench + tower sweep).
+  // PID configured once in configureBindings().
+  private final SwerveRequest.FieldCentricFacingAngle assistSnapRequest =
       new SwerveRequest.FieldCentricFacingAngle();
 
-  // Trench snap hysteresis
-  private Rotation2d m_trenchLockHeading = null;
-  private static final double kTrenchHysteresisDegrees = 30.0; // changeable if desired
+  // === Driver assist zone geometry (blue-origin meters) ===
+  // Each structure has an INSIDE zone (full assist: heading locked to the nearest 90,
+  // translation locked to the axis you're facing) and a NEAR halo around it (assist as
+  // a suggestion: heading snaps only while the driver isn't rotating, translation free).
+  //
+  // MEASURE THESE ON THE REAL FIELD. The Y thresholds came from the trench walls
+  // (~7.62 / ~0.38 m); the X spans and the tower footprint are estimates from field
+  // drawings -- drive to each corner and read the pose off the Field2d widget.
+  private static final double kTrenchXMin = 5.6;
+  private static final double kTrenchXMax = 10.9;
+  private static final double kLeftTrenchYMin = 7.3;
+  private static final double kRightTrenchYMax = 0.7;
+  private static final double kTowerXMin = 7.1;
+  private static final double kTowerXMax = 9.5;
+  private static final double kTowerYMin = 2.9;
+  private static final double kTowerYMax = 5.2;
+  // Width of the "suggestion" halo around each structure.
+  private static final double kAssistNearMargin = 0.8;
+  // Re-snap to a different 90-degree increment only after rotating this far past the
+  // current lock (hysteresis; must be > 45 so the lock can't flicker at the boundary).
+  private static final double kAssistResnapDegrees = 60.0;
 
-  // Trench Y-coordinate bounds (blue-origin field coordinates).
-  // Left trench wall is at ~7.62m, right trench wall is at ~0.38m.
-  // The 0.3m buffer means the lock engages just before the robot is fully inside.
-  private static final double LEFT_TRENCH_Y_MIN  = 7.3;
-  private static final double RIGHT_TRENCH_Y_MAX = 0.7;
+  private enum AssistZone { NONE, TRENCH_NEAR, TRENCH_IN, TOWER_NEAR, TOWER_IN }
+
+  private Rotation2d m_assistLockHeading = null;
 
   private final SendableChooser<Command> autoSelection;
 
@@ -115,62 +131,32 @@ public class RobotContainer {
         m_drivetrain.applyRequest(() -> idle).ignoringDisable(true)
     );
 
-    // === Trench automation ===
-    // When the robot enters either trench (Y outside the field bounds), heading-lock the
-    // drive to 0° or 180° (whichever is closer, with hysteresis so it doesn't flip-flop),
-    // stow the shooter to clear the trench bar, and deploy the intake to GROUND. Driver
-    // retains full translation control. On exit, intake restows but shooter stays stowed
-    // so the driver can manually re-target the hub.
 
-    // Configure the heading PID once here; same gains as faceHubCommand (P = 8).
-    trenchSnapRequest.HeadingController.setP(8.0);
-    trenchSnapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
+    // === Driver assists: trench + tower sweep ===
+    assistSnapRequest.HeadingController.setPID(8, 0, 0.2);
+    assistSnapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    // True when the robot's Y coordinate is inside either trench zone (Y >= 7.3 m or Y <= 0.7 m).
-    Trigger inTrench = new Trigger(() -> {
-      double y = m_drivetrain.getState().Pose.getY();
-      return y >= LEFT_TRENCH_Y_MIN || y <= RIGHT_TRENCH_Y_MAX;
+    // Aiming outranks the assist: while right-trigger or A is held, faceHubCommand owns
+    // the drivetrain (so you can pop out of the trench and immediately shoot).
+    Trigger aimHeld = m_controller.rightTrigger().or(m_controller.a());
+    Trigger assistActive = new Trigger(() -> currentAssistZone() != AssistZone.NONE)
+        .and(aimHeld.negate());
+
+    assistActive.whileTrue(m_drivetrain.applyRequest(this::assistDriveRequest));
+    assistActive.onFalse(Commands.runOnce(() -> m_assistLockHeading = null));
+
+    // Mechanisms only when actually INSIDE a structure: stow the shooter to clear the
+    // bar and deploy the intake so driving through sweeps fuel. Intake restows on exit;
+    // shooter stays stowed until the driver re-aims.
+    Trigger insideStructure = new Trigger(() -> {
+      AssistZone zone = currentAssistZone();
+      return zone == AssistZone.TRENCH_IN || zone == AssistZone.TOWER_IN;
     });
-
-    inTrench.whileTrue(
-        Commands.parallel(
-            // === Heading snap ===
-            // Snap to the nearer of 0°/180° with 30° hysteresis. The hysteresis prevents
-            // flip-flopping when the robot straddles 90°: if we're on 180° and the nearest
-            // snappable angle is 0°, only switch if we're more than 30° away from our
-            // current lock. This keeps the intake pointed steadily into the trench.
-            m_drivetrain.applyRequest(() -> {
-              Rotation2d currentRot = m_drivetrain.getState().Pose.getRotation();
-              Rotation2d target0 = Rotation2d.fromDegrees(0);
-              Rotation2d target180 = Rotation2d.fromDegrees(180);
-              double diff0 = Math.abs(MathUtil.angleModulus(currentRot.minus(target0).getRadians()));
-              double diff180 = Math.abs(MathUtil.angleModulus(currentRot.minus(target180).getRadians()));
-              Rotation2d nearest = diff0 <= diff180 ? target0 : target180;
-              double hystRad = Math.toRadians(kTrenchHysteresisDegrees);
-              if (m_trenchLockHeading == null) {
-                m_trenchLockHeading = nearest;
-              } else {
-                double distToCurrent = Math.abs(MathUtil.angleModulus(currentRot.minus(m_trenchLockHeading).getRadians()));
-                if (nearest != m_trenchLockHeading && distToCurrent > hystRad) {
-                  m_trenchLockHeading = nearest;
-                }
-              }
-              return trenchSnapRequest
-                  .withVelocityX(driverXVelocity())
-                  .withVelocityY(driverYVelocity())
-                  .withDeadband(Constants.kMaxSpeed * 0.1)
-                  .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
-                  .withTargetDirection(m_trenchLockHeading);
-            }),
-            // Stow shooter pivot so it doesn't clip the trench bar (clearance ~15 cm)
-            Commands.runOnce(() -> m_shooter.setState(PivotState.STOW), m_shooter),
-            // Deploy intake to GROUND so the driver can sweep fuel as they drive through
-            m_lintake.setState(PinionState.GROUND)
-        )
-    );
-
-    // On exit, stow the intake. Shooter stays stowed; driver re-targets with rightTrigger.
-    inTrench.onFalse(m_lintake.setState(PinionState.STOW));
+    insideStructure.onTrue(Commands.runOnce(() -> {
+      m_shooter.setState(PivotState.STOW);
+      m_lintake.setPinionState(PinionState.GROUND);
+    }));
+    insideStructure.onFalse(Commands.runOnce(() -> m_lintake.setPinionState(PinionState.STOW)));
 
     // --- Standard driver bindings (unchanged) ---
     m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
@@ -218,6 +204,82 @@ public class RobotContainer {
     // Clear jam: reverse flywheel and indexer to back out a stuck ball.
     // Hold the button until the jam clears, then release.
     m_controller.b().whileTrue(m_shooter.clearJamCommand());
+  }
+
+  // Classify the robot's position against the assist zones. INSIDE beats NEAR when
+  // both could apply; trench beats tower (they shouldn't overlap anyway).
+  private AssistZone currentAssistZone() {
+    var pose = m_drivetrain.getState().Pose;
+    double x = pose.getX();
+    double y = pose.getY();
+
+    boolean trenchIn = (y >= kLeftTrenchYMin || y <= kRightTrenchYMax)
+        && x >= kTrenchXMin && x <= kTrenchXMax;
+    boolean trenchNear = (y >= kLeftTrenchYMin - kAssistNearMargin || y <= kRightTrenchYMax + kAssistNearMargin)
+        && x >= kTrenchXMin - kAssistNearMargin && x <= kTrenchXMax + kAssistNearMargin;
+    boolean towerIn = x >= kTowerXMin && x <= kTowerXMax
+        && y >= kTowerYMin && y <= kTowerYMax;
+    boolean towerNear = x >= kTowerXMin - kAssistNearMargin && x <= kTowerXMax + kAssistNearMargin
+        && y >= kTowerYMin - kAssistNearMargin && y <= kTowerYMax + kAssistNearMargin;
+
+    AssistZone zone = trenchIn ? AssistZone.TRENCH_IN
+        : towerIn ? AssistZone.TOWER_IN
+        : trenchNear ? AssistZone.TRENCH_NEAR
+        : towerNear ? AssistZone.TOWER_NEAR
+        : AssistZone.NONE;
+    SmartDashboard.putString("assist/zone", zone.toString());
+    return zone;
+  }
+
+  // Drive request while an assist zone is active.
+  //   NEAR (halo): the assist is a suggestion -- heading snaps to the nearest 90 only
+  //     while the rotation stick is centered; any rotation input hands heading straight
+  //     back to the driver. Translation is always fully manual.
+  //   INSIDE: heading locked to the nearest 90 (0/90/180/270 -- 90s so you can line up
+  //     a shot straight out of the trench) and translation locked to the axis you're
+  //     facing, so the robot glides through without drifting into the walls.
+  private SwerveRequest assistDriveRequest() {
+    AssistZone zone = currentAssistZone();
+    boolean inside = zone == AssistZone.TRENCH_IN || zone == AssistZone.TOWER_IN;
+
+    boolean driverRotating = Math.abs(m_controller.getRightX()) > 0.1;
+    if (!inside && driverRotating) {
+      m_assistLockHeading = null;  // re-snap fresh once they let go of the stick
+      return driveRequest
+          .withVelocityX(driverXVelocity())
+          .withVelocityY(driverYVelocity())
+          .withRotationalRate(driverRotationalRate());
+    }
+
+    // Snap to the nearest 90-degree increment, with hysteresis: once locked, only
+    // re-snap after the robot has rotated well past the 45-degree boundary.
+    Rotation2d currentRot = m_drivetrain.getState().Pose.getRotation();
+    if (m_assistLockHeading == null
+        || Math.abs(MathUtil.angleModulus(currentRot.minus(m_assistLockHeading).getRadians()))
+            > Math.toRadians(kAssistResnapDegrees)) {
+      m_assistLockHeading = Rotation2d.fromDegrees(Math.round(currentRot.getDegrees() / 90.0) * 90.0);
+    }
+
+    double vx = driverXVelocity();
+    double vy = driverYVelocity();
+    if (inside) {
+      // Lock translation to the facing axis: facing 0/180 keeps X and zeroes Y,
+      // facing 90/270 keeps Y and zeroes X.
+      double lockDeg = Math.abs(MathUtil.inputModulus(m_assistLockHeading.getDegrees(), -180, 180));
+      boolean facingAlongX = lockDeg < 45.0 || lockDeg > 135.0;
+      if (facingAlongX) {
+        vy = 0;
+      } else {
+        vx = 0;
+      }
+    }
+
+    return assistSnapRequest
+        .withVelocityX(vx)
+        .withVelocityY(vy)
+        .withDeadband(Constants.kMaxSpeed * 0.1)
+        .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
+        .withTargetDirection(m_assistLockHeading);
   }
 
   private Command rollerWhileHeldCommand(RollerState state) {

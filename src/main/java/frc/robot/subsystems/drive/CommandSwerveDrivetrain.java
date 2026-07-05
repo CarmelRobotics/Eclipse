@@ -20,6 +20,7 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.filter.LinearFilter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -67,6 +68,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // into the default here once dialed in.
     private final LoggedTunableNumber m_headingOffsetDeg =
         new LoggedTunableNumber("ShotTuning/HeadingOffsetDeg", 0);
+
+    // --- Shoot-on-the-move solution state (computed once per loop in periodic) ---
+    // Velocity lead is low-pass filtered and scaled by MoveCompGain: 1.0 = full physics
+    // lead, 0 = aim as if stationary. 0.7 default deliberately under-leads -- the target
+    // moves far less under the driver, at the cost of a little accuracy at max speed.
+    private final LinearFilter m_shotVelFilterX = LinearFilter.singlePoleIIR(0.15, 0.02);
+    private final LinearFilter m_shotVelFilterY = LinearFilter.singlePoleIIR(0.15, 0.02);
+    private final LoggedTunableNumber m_moveCompGain =
+        new LoggedTunableNumber("ShotTuning/MoveCompGain", 0.7);
+    private Translation2d m_shotVector = new Translation2d(1, 0);
+    private double m_shotTofSeconds = 0.5;
 
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
@@ -400,6 +412,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putNumber("vision/avg tag dist", estimate.avgTagDist);
         }
 
+        // Solve the shoot-on-the-move aim for this loop (after vision so it uses the
+        // freshest pose). Everything downstream -- getHubHeading, getShotDistance,
+        // readyToShoot, the shooter's table lookups -- reads this cached solution.
+        updateShotSolution();
+
         // === Dashboard diagnostics ===
         m_field.setRobotPose(getState().Pose);
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
@@ -525,123 +542,47 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return ChassisSpeeds.fromRobotRelativeSpeeds(getState().Speeds, getState().Pose.getRotation());
     }
 
-    // === Shot time-of-flight ===
-    // Look up the time for the ball to reach the hub at the current distance. The offset
-    // (dashboard-tunable) accounts for release height, drag, and any frame-to-frame delay.
-    public double getShotTimeOfFlightSeconds() {
-        double offset = SmartDashboard.getNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
-        return Math.max(0.001, ShooterConstants.getShotTimeOfFlightSeconds(getDistanceToClosestHub()) + offset);
+    // === Shoot-on-the-move solution ===
+    // shotVector = (hub - robot) - robotVelocity * lead * TOF: the displacement the ball
+    // must cover in the robot's frame so it lands on the hub even though the robot is
+    // moving. Solved ONCE per loop in updateShotSolution(); the getters below return the
+    // cached solution. It used to be re-derived 5-6 times per loop straight from raw
+    // module-state speeds, which is where the on-the-move twitchiness came from:
+    //   - raw swerve speeds are noisy, and every wiggle went straight into the aim target
+    //     the heading controller was chasing at P=8
+    //   - TOF was looked up at the RAW hub distance while the table lookup used the led
+    //     distance, so the lead itself was computed with the wrong flight time
+    private void updateShotSolution() {
+        Translation2d robotToHub = getHubPosition().minus(getState().Pose.getTranslation());
+
+        // Low-pass the field velocity used for lead (~0.15 s time constant): the aim
+        // target follows real acceleration but stops chattering with module noise.
+        ChassisSpeeds speeds = getFieldRelativeSpeeds();
+        Translation2d lead = new Translation2d(
+            m_shotVelFilterX.calculate(speeds.vxMetersPerSecond),
+            m_shotVelFilterY.calculate(speeds.vyMetersPerSecond)
+        ).times(m_moveCompGain.get());
+
+        // Fixed-point iteration: lead depends on TOF, TOF depends on the led distance.
+        // Converges in 2-3 passes at any legal robot speed.
+        double tofOffset = SmartDashboard.getNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
+        double tof = Math.max(0.001, ShooterConstants.getShotTimeOfFlightSeconds(robotToHub.getNorm()) + tofOffset);
+        Translation2d shotVector = robotToHub;
+        for (int i = 0; i < 3; i++) {
+            shotVector = robotToHub.minus(lead.times(tof));
+            tof = Math.max(0.001, ShooterConstants.getShotTimeOfFlightSeconds(shotVector.getNorm()) + tofOffset);
+        }
+
+        m_shotVector = shotVector;
+        m_shotTofSeconds = tof;
     }
 
-    // === Shoot-on-the-move: motion compensation ===
-    // PROBLEM: A stationary robot aims at the hub's current position. A moving robot
-    // must aim at where the hub will be when the ball arrives. At 6 m/s robot speed,
-    // 0.8 s ball flight, the hub moves ~4.8 m in the ball's frame. Not accounting for
-    // this causes the shot to miss by meters.
-    //
-    // SOLUTION: Compute a "virtual hub position" (in robot-relative space) that
-    // accounts for the robot's motion. When the robot aims at this position, the ball
-    // trajectory intersects the actual hub.
-    //
-    // MATHEMATICAL DERIVATION:
-    //   We want to find the aiming direction d such that, if the ball is launched at
-    //   speed v in direction d (from the robot's current position), and the robot
-    //   continues at its current velocity v_robot for time TOF, the ball will intersect
-    //   the hub at the hub's future position.
-    //
-    //   In field space:
-    //     ball_final = robot_pos + ball_displacement
-    //     hub_final = hub_pos + robot_velocity * TOF
-    //     We want: ball_final = hub_final
-    //     → ball_displacement = (hub_pos + robot_vel * TOF) - robot_pos
-    //     → ball_displacement = (hub_pos - robot_pos) + robot_vel * TOF
-    //
-    //   But the ball flies in a ballistic arc. What matters is the *average* velocity
-    //   the ball must maintain to cover the displacement in time TOF. This is derived
-    //   from the shot table's physics; for now, assume the table's distance and TOF
-    //   directly yield the required ball velocity magnitude and direction.
-    //
-    //   In robot space:
-    //     The robot sees the hub at a certain bearing. But because the robot is moving,
-    //     the relative position changes over TOF. The required ball velocity (in field
-    //     space) is:
-    //       v_ball_field = (hub_pos - robot_pos + robot_vel * TOF) / TOF
-    //                     = (hub_pos - robot_pos) / TOF + robot_vel
-    //
-    //     From the robot's perspective (in robot body frame), the required velocity is:
-    //       v_ball_robot = v_ball_field - v_robot
-    //                     = (hub_pos - robot_pos) / TOF + robot_vel - robot_vel
-    //                     = (hub_pos - robot_pos) / TOF
-    //       Wait, that can't be right...
-    //
-    //   Actually, let's think differently. The robot fires the ball at some speed in
-    //   some direction. That speed is determined by the shot table (e.g., 30 RPS for
-    //   3.5 m). The direction is what we compute. The ball, once fired, follows a
-    //   ballistic path in field space. For the ball to hit the hub at the hub's future
-    //   position, the initial launch direction must account for the hub's motion relative
-    //   to the robot.
-    //
-    //   Here's the correct model:
-    //   - The hub is at position H in field space.
-    //   - The robot is at position R and moving at velocity v_r (field frame).
-    //   - In time TOF, the hub moves to H + v_hub * TOF ≈ H (hub is stationary on field).
-    //   - The robot will be at R + v_r * TOF.
-    //   - We want the ball to reach the hub. The relative position at end of flight is:
-    //       hub_end - robot_end = H - (R + v_r * TOF) = (H - R) - v_r * TOF
-    //   - But wait, the robot is accelerating with the ball, so the initial relative
-    //     position is (H - R). The ball must cover a distance that accounts for the
-    //     robot moving away (or toward) the hub during flight.
-    //   - The net displacement in the robot's frame is:
-    //       displacement_robot = (H - R) - v_r * TOF
-    //   - This is the distance the ball must travel *in the robot's frame* to hit the hub.
-    //   - BUT: the ball is launched in the robot's body frame, not the field frame.
-    //     In the robot's body frame, the ball flies straight (ignoring gravity for
-    //     horizontal aiming). So the direction to aim is the angle of this displacement.
-    //
-    //   CODE DERIVATION:
-    //   - robotToHub = H - R (field frame)
-    //   - requiredFieldVelocity = robotToHub / TOF (field velocity needed)
-    //   - requiredRobotVelocity = requiredFieldVelocity - v_r (relative velocity)
-    //   - shotVector = requiredRobotVelocity * TOF (integrate to displacement)
-    //
-    //   This is equivalent to:
-    //   - shotVector = (robotToHub / TOF - v_r) * TOF
-    //               = robotToHub - v_r * TOF
-    //   Which is exactly the relative displacement we derived above!
-    //
-    // INTERPRETATION:
-    //   The shot vector is the displacement in robot-relative space that the ball must
-    //   cover to hit the hub, accounting for the robot's motion. If the robot is moving
-    //   toward the hub, the required displacement shrinks. If moving away, it grows.
-    //   If moving perpendicular to the hub, the shot vector rotates (aim perpendicular
-    //   to the motion).
-    //
-    // ASSUMPTIONS:
-    //   1. The ball follows a ballistic arc; we use the shot table's distance and TOF
-    //      which encode the minimum-energy trajectory's hang time.
-    //   2. The robot's velocity is constant over TOF. True for swerve; false if braking.
-    //   3. The hub is stationary. True in *REBUILT*; false if the hub rotates or moves.
-    //   4. Aiming is in the horizontal plane only. We ignore vertical motion.
+    public double getShotTimeOfFlightSeconds() {
+        return m_shotTofSeconds;
+    }
 
     public Translation2d getMotionCompensatedShotVector() {
-        Translation2d robotToHub = getHubPosition().minus(getState().Pose.getTranslation());
-        double timeOfFlight = getShotTimeOfFlightSeconds();
-        ChassisSpeeds fieldSpeeds = getFieldRelativeSpeeds();
-
-        // Velocity the ball must maintain in field space to reach the hub's current position
-        // in TOF seconds, starting from the robot's current position.
-        Translation2d requiredFieldVelocity = robotToHub.div(timeOfFlight);
-
-        // Relative velocity: what velocity the ball must have relative to the robot. This
-        // accounts for the robot's own motion; if the robot is moving toward the hub, less
-        // relative velocity is needed.
-        Translation2d requiredRobotRelativeShotVelocity = requiredFieldVelocity.minus(
-            new Translation2d(fieldSpeeds.vxMetersPerSecond, fieldSpeeds.vyMetersPerSecond)
-        );
-
-        // Integrate velocity over TOF to get the displacement vector. This is the distance
-        // and bearing the robot should aim at to intersect the hub.
-        return requiredRobotRelativeShotVelocity.times(timeOfFlight);
+        return m_shotVector;
     }
 
     // === Compensated hub position (for visualization) ===
