@@ -74,6 +74,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // between corners while driving down the middle.
     private boolean m_passHighSide = false;
 
+    // How far the pass aim point sits in from the corner walls. Deliberately deep:
+    // backspin bounces balls back toward the field on landing, so impact near the
+    // corner settles the ball in the zone. Tune live watching where balls SETTLE.
+    private final LoggedTunableNumber m_passCornerInset =
+        new LoggedTunableNumber(ShooterConstants.kPassCornerInsetKey, ShooterConstants.kPassCornerInsetMeters);
+
     // --- Shoot-on-the-move solution state (computed once per loop in periodic) ---
     // Velocity lead is low-pass filtered and scaled by MoveCompGain: 1.0 = full physics
     // lead, 0 = aim as if stationary. 0.7 default deliberately under-leads -- the target
@@ -665,12 +671,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // instead of ricocheting off the corner. Own alliance end comes from the DS setting.
     public Translation2d getPassTarget() {
         boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        double inset = m_passCornerInset.get();
         double x = red
-            ? ShooterConstants.kFieldLengthMeters - ShooterConstants.kPassCornerInsetMeters
-            : ShooterConstants.kPassCornerInsetMeters;
+            ? ShooterConstants.kFieldLengthMeters - inset
+            : inset;
         double y = m_passHighSide
-            ? ShooterConstants.kFieldWidthMeters - ShooterConstants.kPassCornerInsetMeters
-            : ShooterConstants.kPassCornerInsetMeters;
+            ? ShooterConstants.kFieldWidthMeters - inset
+            : inset;
         return new Translation2d(x, y);
     }
 

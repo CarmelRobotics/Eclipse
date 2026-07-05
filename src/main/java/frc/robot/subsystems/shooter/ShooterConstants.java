@@ -33,9 +33,14 @@ public final class ShooterConstants {
     public static final double kFieldWidthMeters = 8.069;
 
     // ===== Passing (ferry to the alliance zone) =====
-    // Pass landing targets are the alliance-zone corners, inset from the walls so the
-    // ball lands in the zone instead of bouncing off the corner plating.
-    public static final double kPassCornerInsetMeters = 1.5;
+    // Pass landing targets are the alliance-zone corners. The heavy backspin makes
+    // balls check up and often bounce BACK toward the field on landing, so the aim
+    // point is deliberately deep (small inset): impact near the corner, bounce-back
+    // settles the ball in the zone. Even a wall hit drops dead at the base with
+    // backspin. Live-tunable via kPassCornerInsetKey -- tune by watching where balls
+    // SETTLE, not where they first land.
+    public static final double kPassCornerInsetMeters = 1.0;
+    public static final String kPassCornerInsetKey = "ShotTuning/PassCornerInsetM";
     // Wider aim tolerance than hub shots: a pass lands in a ~2 m zone, not a 0.6 m hub.
     public static final double kPassHeadingToleranceDegrees = 10.0;
     // Passes command up to ~60 RPS; spin-up from idle takes longer than a hub shot's.
