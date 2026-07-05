@@ -52,12 +52,11 @@ public class Lintake extends SubsystemBase {
     public void periodic() {
         m_rollerMotor.setVoltage(m_rollerState.volts);
 
-        // Gain slot by state: GROUND holds on the compliant slot 1 (a front hit
-        // back-drives the intake inward against a weak spring and it walks itself back
-        // out afterwards), everything else runs the stiff slot 0 for tracking authority.
-        int slot = m_pinionState == PinionState.GROUND ? 1 : 0;
-        m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position).withSlot(slot));
-        m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position).withSlot(slot));
+        // Compliance is handled by the pinion stator current limit (see
+        // LintakeConstants.kPinionCurrentLimits), not by gains -- so a single stiff
+        // slot 0 drives every state and the intake still back-drives when it hits a wall.
+        m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
+        m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
 
         SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());

@@ -4,7 +4,6 @@ import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.configs.Slot1Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.signals.InvertedValue;
 
@@ -33,20 +32,8 @@ public final class LintakeConstants {
         private static final double kMotionMagicAcceleration = 135;
         private static final double kMotionMagicJerk = 1600;
 
-        // Slot 0: stiff gains for actual moves (stow, agitate, deploy) where tracking
-        // authority matters -- e.g. clearing the trench bar on a stow.
         private static final Slot0Configs Slot0Configs = new Slot0Configs()
             .withKA(kA).withKD(kD).withKI(kI).withKP(kP).withKS(kS).withKV(kV);
-
-        // Slot 1: COMPLIANT gains, used only while holding GROUND. A front impact from
-        // another robot back-drives the intake inward against a weak spring instead of
-        // a rigid position hold (which put the whole hit through the pinion gearing);
-        // when the hit ends, the same weak P walks it back out to GROUND on its own.
-        // If the intake won't stay planted on the carpet while driving, raise this kP
-        // a little; if hits still feel harsh, lower it.
-        private static final double kCompliantP = 0.15;
-        private static final Slot1Configs Slot1Configs = new Slot1Configs()
-            .withKP(kCompliantP).withKI(0).withKD(0).withKS(0).withKV(0).withKA(0);
 
         private static final MotionMagicConfigs MotionMagicConfigs = new MotionMagicConfigs()
             .withMotionMagicCruiseVelocity(kMotionMagicCruiseVelocity)
@@ -65,25 +52,37 @@ public final class LintakeConstants {
             .withKD(kD).withKI(kI).withKP(kP).withKV(kV).withKS(kS);
     }
     
-    // Brownout budget: neither the pinions nor the roller had ANY current limit, and the
-    // shooting-time agitation pump accelerates both pinions every 0.3 s. 30 A supply each
-    // bounds the whole intake at ~90 A worst case without slowing normal moves.
-    private static final CurrentLimitsConfigs kIntakeCurrentLimits = new CurrentLimitsConfigs()
+    // Pinion current limits.
+    //   Stator 15 A: the COMPLIANCE knob. Stator current is proportional to torque, so
+    //     capping it caps how hard the pinions can ever push. Gearing is 3:1 belt -> 10T
+    //     10DP pinion (1" pitch dia) on the rack, and a Kraken makes ~0.0194 N*m/A, so
+    //     15 A x 2 motors x 3 : (0.5" radius) ~= 31 lbf of hold/resist force. Drive the
+    //     intake into a wall harder than that and it back-drives inward instead of
+    //     stalling the motors; it re-extends when the wall is gone. Deploy/retract only
+    //     needs ~5-15 lbf, so 15 A still moves it crisply. Raise for a firmer hold that
+    //     yields to less; lower to slide in on lighter contact.
+    //   Supply 30 A: brownout budget, unchanged.
+    private static final CurrentLimitsConfigs kPinionCurrentLimits = new CurrentLimitsConfigs()
+        .withStatorCurrentLimitEnable(true).withStatorCurrentLimit(15)
+        .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
+
+    // Roller keeps just the brownout supply cap (no compliance role).
+    private static final CurrentLimitsConfigs kRollerCurrentLimits = new CurrentLimitsConfigs()
         .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
 
     public static final TalonFXConfiguration LeaderPinionConfig = new TalonFXConfiguration()
-        .withSlot0(PinionConfigs.Slot0Configs).withSlot1(PinionConfigs.Slot1Configs)
+        .withSlot0(PinionConfigs.Slot0Configs)
         .withMotionMagic(PinionConfigs.MotionMagicConfigs)
-        .withCurrentLimits(kIntakeCurrentLimits)
+        .withCurrentLimits(kPinionCurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
     public static final TalonFXConfiguration FollowerPinionConfig = new TalonFXConfiguration()
-        .withSlot0(PinionConfigs.Slot0Configs).withSlot1(PinionConfigs.Slot1Configs)
+        .withSlot0(PinionConfigs.Slot0Configs)
         .withMotionMagic(PinionConfigs.MotionMagicConfigs)
-        .withCurrentLimits(kIntakeCurrentLimits)
+        .withCurrentLimits(kPinionCurrentLimits)
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
     public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration()
-        .withSlot0(RollerConfigs.Slot0Configs).withCurrentLimits(kIntakeCurrentLimits);
+        .withSlot0(RollerConfigs.Slot0Configs).withCurrentLimits(kRollerCurrentLimits);
 
     public enum PinionState {
         STOW(-4),
