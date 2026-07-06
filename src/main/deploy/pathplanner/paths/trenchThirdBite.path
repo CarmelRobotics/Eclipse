@@ -3,25 +3,25 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 5.5,
-        "y": 2.8
+        "x": 6.0,
+        "y": 4.2
       },
       "prevControl": null,
       "nextControl": {
-        "x": 6.5,
-        "y": 2.5
+        "x": 7.0,
+        "y": 3.7
       },
       "isLocked": false,
       "linkedName": "cycle2 shoot spot"
     },
     {
       "anchor": {
-        "x": 8.0,
-        "y": 2.0
+        "x": 7.9,
+        "y": 2.9
       },
       "prevControl": {
-        "x": 7.0,
-        "y": 2.2
+        "x": 7.2,
+        "y": 3.3
       },
       "nextControl": null,
       "isLocked": false,
@@ -42,13 +42,13 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": 0.0
+    "rotation": -35.0
   },
   "reversed": false,
   "folder": null,
   "idealStartingState": {
     "velocity": 0,
-    "rotation": 125.3
+    "rotation": -173.2
   },
   "useDefaultConstraints": false
 }

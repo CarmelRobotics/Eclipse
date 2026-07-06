@@ -3,25 +3,25 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 7.6,
-        "y": 1.5
+        "x": 7.8,
+        "y": 4.9
       },
       "prevControl": null,
       "nextControl": {
-        "x": 6.8,
-        "y": 2.0
+        "x": 7.2,
+        "y": 4.5
       },
       "isLocked": false,
       "linkedName": "cycle2 mid"
     },
     {
       "anchor": {
-        "x": 5.5,
-        "y": 2.8
+        "x": 6.0,
+        "y": 4.2
       },
       "prevControl": {
-        "x": 6.0,
-        "y": 2.4
+        "x": 6.6,
+        "y": 4.35
       },
       "nextControl": null,
       "isLocked": false,
@@ -32,7 +32,7 @@
   "constraintZones": [
     {
       "name": "settle for shot",
-      "minWaypointRelativePos": 0.6,
+      "minWaypointRelativePos": 0.55,
       "maxWaypointRelativePos": 1.0,
       "constraints": {
         "maxVelocity": 1.2,
@@ -56,13 +56,13 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": 125.3
+    "rotation": -173.2
   },
   "reversed": false,
   "folder": null,
   "idealStartingState": {
     "velocity": 1.0,
-    "rotation": 0.0
+    "rotation": 35.0
   },
   "useDefaultConstraints": false
 }
