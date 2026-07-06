@@ -219,7 +219,7 @@ public class RobotContainer {
                 heldPassCommand(),
                 rumbleWhenReady(m_shooter::readyToPass)
             ),
-            () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
+            () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters && isInAllianceZone()
         )
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
@@ -264,6 +264,14 @@ public class RobotContainer {
         Rotation2d.fromDegrees(m_simPoseHeadingDeg.get())
       ));
     }, m_drivetrain));
+  }
+
+  // Check if the robot is in the alliance zone (on its own half of the field).
+  // Hub is at the center, so this prevents hub shots when you're on the opponent's side.
+  private boolean isInAllianceZone() {
+    double x = m_drivetrain.getState().Pose.getX();
+    double fieldCenterX = kFieldLength / 2.0;
+    return x < fieldCenterX;  // True if on blue half; robots auto-flip red pose to blue origin
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when
