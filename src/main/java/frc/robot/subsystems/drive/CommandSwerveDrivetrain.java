@@ -539,15 +539,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             case Blue -> redInactiveFirst;
         };
 
-        if (matchTime > 130) {
+        // Teleop timeline (135 s countdown): 10 s both hubs active, then four 25 s shifts,
+        // then both active again for the final 25 s.
+        if (matchTime > 125) {
             return true;
-        } else if (matchTime > 105) {
+        } else if (matchTime > 100) {
             return shift1Active;
-        } else if (matchTime > 80) {
+        } else if (matchTime > 75) {
             return !shift1Active;
-        } else if (matchTime > 55) {
+        } else if (matchTime > 50) {
             return shift1Active;
-        } else if (matchTime > 30) {
+        } else if (matchTime > 25) {
             return !shift1Active;
         } else {
             return true;
