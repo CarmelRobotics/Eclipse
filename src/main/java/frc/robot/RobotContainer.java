@@ -266,12 +266,23 @@ public class RobotContainer {
     }, m_drivetrain));
   }
 
-  // Check if the robot is in the alliance zone (on its own half of the field).
-  // Hub is at the center, so this prevents hub shots when you're on the opponent's side.
+  // True when the robot is on the same half of the field as the hub it's aiming at, i.e.
+  // legally inside its own alliance zone. This gates hub shots on POSITION, not just
+  // distance: without it a robot could cross the midline and still be within 5 m of its
+  // hub (the hub sits ~4.6 m in and the range is 5 m, so the circle spills past center).
+  //
+  // The pose is in absolute blue-origin field coordinates and does NOT flip by alliance --
+  // that's why getHubPosition() keeps two hub positions and picks one. So we can't just say
+  // "x < center": that's only right for blue. Instead we compare the robot's half to the
+  // TARGET HUB's half, which stays correct for both alliances and mirrors exactly which hub
+  // getHubPosition() chose (alliance hub with FMS, nearest hub in the shop).
   private boolean isInAllianceZone() {
-    double x = m_drivetrain.getState().Pose.getX();
     double fieldCenterX = kFieldLength / 2.0;
-    return x < fieldCenterX;  // True if on blue half; robots auto-flip red pose to blue origin
+    double robotX = m_drivetrain.getState().Pose.getX();
+    double hubX = m_drivetrain.getHubPosition().getX();
+    boolean hubOnBlueHalf = hubX < fieldCenterX;
+    boolean robotOnBlueHalf = robotX < fieldCenterX;
+    return hubOnBlueHalf == robotOnBlueHalf;
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when
