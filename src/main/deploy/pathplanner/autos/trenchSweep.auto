@@ -1,0 +1,68 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "named",
+          "data": {
+            "name": "intake deploy"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake run"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchSweepCollect"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchSweepToHub"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake retract"
+          }
+        },
+        {
+          "type": "race",
+          "data": {
+            "commands": [
+              {
+                "type": "named",
+                "data": {
+                  "name": "shoot"
+                }
+              },
+              {
+                "type": "wait",
+                "data": {
+                  "waitTime": 3.0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}
