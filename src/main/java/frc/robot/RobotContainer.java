@@ -27,6 +27,7 @@ import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
 import frc.robot.subsystems.shooter.Shooter;
 import frc.robot.subsystems.shooter.ShooterConstants;
+import frc.robot.util.LoggedTunableNumber;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
@@ -183,7 +184,7 @@ public class RobotContainer {
     );
 
     m_controller.a().whileTrue(
-        m_drivetrain.faceHubCommand(this::driverXVelocity, this::driverYVelocity)
+        m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity)
     );
     // Right trigger: context-aware score. Inside hub range (5 m) -> full hub shot;
     // beyond it -> smart pass to the alliance-zone corner. The choice LATCHES at the
@@ -193,11 +194,11 @@ public class RobotContainer {
     m_controller.rightTrigger().whileTrue(
         Commands.either(
             Commands.parallel(
-                m_drivetrain.faceHubCommand(this::driverXVelocity, this::driverYVelocity),
+                m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
                 heldShotCommand(PivotState.SCORE, ShooterState.SCORE)
             ),
             Commands.parallel(
-                m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity),
+                m_drivetrain.facePassTargetCommand(this::shootingXVelocity, this::shootingYVelocity),
                 heldPassCommand()
             ),
             () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
@@ -431,6 +432,21 @@ public class RobotContainer {
 
   private double driverYVelocity() {
     return -m_controller.getLeftX() * Constants.kMaxSpeed;
+  }
+
+  // While aiming (hub or pass), scale translation down so shoot-on-the-move is more
+  // accurate: less speed = smaller velocity lead and less stick/velocity noise fed into
+  // the aim. Full stick still works, just capped at this fraction of top speed. Tune the
+  // mobility-vs-accuracy tradeoff live; 1.0 = no reduction.
+  private final LoggedTunableNumber m_shootingSpeedScale =
+      new LoggedTunableNumber("ShotTuning/ShootingSpeedScale", 0.45);
+
+  private double shootingXVelocity() {
+    return driverXVelocity() * m_shootingSpeedScale.get();
+  }
+
+  private double shootingYVelocity() {
+    return driverYVelocity() * m_shootingSpeedScale.get();
   }
 
   private double driverRotationalRate() {
