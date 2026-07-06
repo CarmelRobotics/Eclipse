@@ -194,7 +194,6 @@ public class RobotContainer {
     m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
     m_controller.leftBumper().onTrue(m_lintake.setState(PinionState.GROUND));
     m_controller.rightBumper().onTrue(m_lintake.setState(PinionState.STOW));
-    m_controller.x().onTrue(m_lintake.setState(PinionState.AGITATE));
 
     m_controller.leftTrigger().whileTrue(
         rollerWhileHeldCommand(RollerState.INTAKE)
@@ -261,9 +260,10 @@ public class RobotContainer {
     // Hold the button until the jam clears, then release.
     m_controller.b().whileTrue(m_shooter.clearJamCommand());
 
-    // X-lock defense brake: hold right-stick click (R3) to lock the wheels into an X so
-    // the robot can't be shoved off its spot. Release to drive normally again.
-    m_controller.rightStick().whileTrue(m_drivetrain.applyRequest(() -> brakeRequest));
+    // X-lock defense brake: hold X to lock the wheels into an X so the robot can't be
+    // shoved off its spot. Release to drive normally again. (X was freed up when agitate
+    // became automatic during shots.)
+    m_controller.x().whileTrue(m_drivetrain.applyRequest(() -> brakeRequest));
 
     // === Simulation pose setter (dashboard button) ===
     // Edit Sim/PoseX, Sim/PoseY, Sim/PoseHeadingDeg on the dashboard, then click
