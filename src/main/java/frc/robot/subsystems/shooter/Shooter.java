@@ -357,7 +357,12 @@ public class Shooter extends SubsystemBase {
         // variable so shot detection below can measure actual vs. commanded to detect
         // the velocity dip when a ball passes through.
         double commandedRps = switch (m_shooterState) {
-            case ZERO -> ShooterConstants.kIdleShooterRps;  // idle spin (6.7 RPS)
+            // Idle spin only pays off near the hub (faster spin-up to a shot). Far away --
+            // playing defense, ferrying across the field -- keeping the 4-motor drum
+            // turning is pure wasted draw, so let it coast to a full stop out there. It
+            // re-spins as you approach, well before you're in shooting range.
+            case ZERO -> m_drive.getDistanceToClosestHub() <= ShooterConstants.kIdleSpinMaxDistanceMeters
+                ? ShooterConstants.kIdleShooterRps : 0.0;
             case SCORE -> m_targetShooterRps;                // hub shot, distance-dependent
             case PASS -> m_targetPassRps;                    // ferry, distance-dependent
             case LOB -> ShooterConstants.kLobShooterRps;     // legacy fixed 40 RPS ferry

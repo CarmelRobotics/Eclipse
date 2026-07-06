@@ -59,10 +59,23 @@ public class TunerConstants {
                 // Brownout guard: the slip (stator) limit bounds traction torque but NOT
                 // battery draw -- four unlimited drive Krakens demand 300+ A on a hard
                 // launch, which alone sags a good battery toward the brownout threshold
-                // before the 4-motor flywheel even spins up. 50 A each caps the
-                // drivetrain at 200 A of supply. Costs a little peak acceleration.
-                .withSupplyCurrentLimit(Amps.of(50))
+                // before the 4-motor flywheel even spins up. 40 A each caps the
+                // drivetrain at 160 A of supply.
+                // REVERT KNOB: this is the one power cut with a real performance cost --
+                // it caps sustained pushing/shoving force. If you lose too many pushing
+                // battles, bump back toward 50. Launch accel is still traction-limited by
+                // the 120 A slip current, so acceleration off the line barely changes.
+                .withSupplyCurrentLimit(Amps.of(40))
                 .withSupplyCurrentLimitEnable(true)
+        )
+        // Open-loop voltage ramp: teleop drive uses OpenLoopVoltage, so a full stick slam
+        // otherwise commands a 0->12 V step and a huge di/dt current spike -- the single
+        // biggest brownout trigger in normal driving. Ramping to full voltage over 0.15 s
+        // flattens that spike with no steady-state cost (top speed/accel unchanged, just
+        // 0.15 s to get there -- imperceptible, arguably smoother). Only affects open-loop
+        // teleop; auto path following is closed-loop velocity and untouched.
+        .withOpenLoopRamps(
+            new OpenLoopRampsConfigs().withVoltageOpenLoopRampPeriod(0.15)
         );
     private static final TalonFXConfiguration steerInitialConfigs = new TalonFXConfiguration()
         .withCurrentLimits(
