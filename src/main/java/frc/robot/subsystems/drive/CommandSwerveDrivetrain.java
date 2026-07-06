@@ -457,7 +457,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // gates the right-trigger context choice). Computed BEFORE the aim/auto mode string
         // below so the dashboard mirrors the exact condition a trigger pull would evaluate.
         double matchTime = DriverStation.getMatchTime();
-        String gameData = DriverStation.getGameSpecificMessage();
+        String gameData = effectiveGameData();
         m_ourHubActive = computeOurHubActive(matchTime, gameData);
         SmartDashboard.putBoolean("our hub active", m_ourHubActive);
 
@@ -486,6 +486,24 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
      *  shop (no game data -> assume active), false during the opponent's teleop shift. */
     public boolean isOurHubActive() {
         return m_ourHubActive;
+    }
+
+    // Game data to feed the SHIFTS logic. Real game data always wins. When it's empty:
+    //   WITH FMS (real match, data not sent yet): keep it empty -- the compute treats that
+    //     as "assume active", which is the safe default when we genuinely don't know the
+    //     shift order yet. Never guess on a real field.
+    //   WITHOUT FMS: synthesize 'B' so DS *practice mode* actually cycles the shifts --
+    //     practice mode supplies a real teleop countdown, and with synthesized data the
+    //     active/inactive swaps happen on schedule so drivers can rehearse them. ('B' =
+    //     blue inactive first; type R or B into the DS setup tab's Game Data box to choose
+    //     the order instead.) Plain teleop without a countdown reads matchTime = -1, which
+    //     lands in the always-active window, so ordinary shop driving is unaffected.
+    private String effectiveGameData() {
+        String gameData = DriverStation.getGameSpecificMessage();
+        if (gameData != null && !gameData.isEmpty()) {
+            return gameData;
+        }
+        return DriverStation.isFMSAttached() ? "" : "B";
     }
 
     private boolean computeOurHubActive(double matchTime, String gameData) {
