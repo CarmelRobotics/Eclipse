@@ -1,6 +1,7 @@
 package frc.robot.subsystems.lintake;
 
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
+import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
@@ -32,6 +33,15 @@ public class Lintake extends SubsystemBase {
         m_followerPinionMotor.setNeutralMode(NeutralModeValue.Brake);
 
         m_rollerMotor.setNeutralMode(NeutralModeValue.Coast);
+    }
+
+    /** Every CTRE device this subsystem owns, for the SystemsCheck fault monitor. */
+    public java.util.Map<String, ParentDevice> getDevices() {
+        java.util.Map<String, ParentDevice> devices = new java.util.LinkedHashMap<>();
+        devices.put("Lintake/PinionLeader", m_leaderPinionMotor);
+        devices.put("Lintake/PinionFollower", m_followerPinionMotor);
+        devices.put("Lintake/Roller", m_rollerMotor);
+        return devices;
     }
 
     public Command setState(PinionState pinionState) {

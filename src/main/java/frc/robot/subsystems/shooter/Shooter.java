@@ -7,6 +7,7 @@ import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.VoltageOut;
+import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 
 import dev.doglog.DogLog;
@@ -149,6 +150,23 @@ public class Shooter extends SubsystemBase {
     private boolean m_inDip = false;       // currently experiencing a dip (ball in flight or stuck)
 
     private final CommandSwerveDrivetrain m_drive;
+
+    /**
+     * Every CTRE device this subsystem owns, keyed by a stable human-readable name, for the
+     * SystemsCheck fault monitor and pit self-test. LinkedHashMap so the dashboard order is
+     * stable loop to loop.
+     */
+    public java.util.Map<String, ParentDevice> getDevices() {
+        java.util.Map<String, ParentDevice> devices = new java.util.LinkedHashMap<>();
+        devices.put("Shooter/Indexer", m_indexerMotor);
+        devices.put("Shooter/PivotLeader", m_leaderPivotMotor);
+        devices.put("Shooter/PivotFollower", m_followerPivotMotor);
+        devices.put("Shooter/FlywheelLeftLeader", m_leftLeaderShooterMotor);
+        devices.put("Shooter/FlywheelBackLeft", m_backLeftFollowerShooterMotor);
+        devices.put("Shooter/FlywheelRight", m_rightFollowerShooterMotor);
+        devices.put("Shooter/FlywheelBackRight", m_backRightFollowerShooterMotor);
+        return devices;
+    }
 
     public Shooter(CommandSwerveDrivetrain drive) {
         m_drive = drive;

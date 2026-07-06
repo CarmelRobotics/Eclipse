@@ -25,6 +25,7 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import frc.robot.subsystems.diagnostics.SystemsCheck;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.drive.TunerConstants;
 import frc.robot.subsystems.lintake.Lintake;
@@ -41,6 +42,7 @@ public class RobotContainer {
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(m_drivetrain);
+  private final SystemsCheck m_systemsCheck = new SystemsCheck(m_drivetrain, m_shooter, m_lintake);
   private final CommandXboxController m_controller = new CommandXboxController(0);
 
   private final SwerveRequest.FieldCentric driveRequest = new SwerveRequest.FieldCentric()
@@ -52,6 +54,9 @@ public class RobotContainer {
   // PID configured once in configureBindings().
   private final SwerveRequest.FieldCentricFacingAngle assistSnapRequest =
       new SwerveRequest.FieldCentricFacingAngle();
+
+  // X-lock: crosses all four wheels toward the robot center so it resists being pushed.
+  private final SwerveRequest.SwerveDriveBrake brakeRequest = new SwerveRequest.SwerveDriveBrake();
 
   // === Driver assist zone geometry (blue-origin meters) ===
   // Each structure has an INSIDE zone (full assist: heading locked to the nearest 90,
@@ -256,6 +261,10 @@ public class RobotContainer {
     // Hold the button until the jam clears, then release.
     m_controller.b().whileTrue(m_shooter.clearJamCommand());
 
+    // X-lock defense brake: hold right-stick click (R3) to lock the wheels into an X so
+    // the robot can't be shoved off its spot. Release to drive normally again.
+    m_controller.rightStick().whileTrue(m_drivetrain.applyRequest(() -> brakeRequest));
+
     // === Simulation pose setter (dashboard button) ===
     // Edit Sim/PoseX, Sim/PoseY, Sim/PoseHeadingDeg on the dashboard, then click
     // Sim/ApplyPose to teleport the robot there. All dashboard-driven, no controller.
@@ -266,6 +275,14 @@ public class RobotContainer {
         Rotation2d.fromDegrees(m_simPoseHeadingDeg.get())
       ));
     }, m_drivetrain));
+
+    // === Systems check (pit self-test) ===
+    // Read-only pass/fail sweep of every CTRE device + camera + gyro + battery. Click
+    // SystemsCheck/Run on the dashboard any time (works while disabled), or just enter Test
+    // mode and it runs automatically. Verdict lands in SystemsCheck/Result (+ /Report), and
+    // the live Faults/* flags update every loop regardless.
+    SmartDashboard.putData("SystemsCheck/Run", m_systemsCheck.fullCheckCommand());
+    RobotModeTriggers.test().onTrue(m_systemsCheck.fullCheckCommand());
   }
 
   // True when the robot is legally inside its own alliance zone. This gates hub shots on
