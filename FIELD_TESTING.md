@@ -67,10 +67,11 @@ write numbers down IN THIS DOC (or a photo of it) so tuning survives the drive h
       X-line → flips to PASS; `aim/in alliance zone` flips false
       (mode also requires `our hub active` — always true in ordinary teleop driving;
       in a real match RT auto-ferries during the opponent's SHIFT)
-- [ ] Optional SHIFTS rehearsal: run **DS Practice mode** (set teleop length to 135 s
-      in the DS setup tab) — the shifts cycle automatically (`our hub active` swaps
-      every 25 s, RT flips HUB↔PASS with it). Synthesized order is blue-inactive-first;
-      type `R` or `B` in the DS Game Data box to choose
+- [ ] Optional SHIFTS rehearsal: run **DS Practice mode** (set teleop length to 140 s
+      in the DS setup tab — real REBUILT teleop is 2:20) — the shifts cycle
+      automatically: 10 s all-active, four 25 s shifts (`our hub active` swaps, RT
+      flips HUB↔PASS with it), 30 s all-active endgame. Synthesized order is
+      blue-inactive-first; type `R` or `B` in the DS Game Data box to choose
 - [ ] `dist to hub` vs tape measure at your marked spot: within ~0.2 m
       (if this is wrong, DO NOT tune shots — fix pose first, everything depends on it)
 
