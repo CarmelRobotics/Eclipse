@@ -266,23 +266,25 @@ public class RobotContainer {
     }, m_drivetrain));
   }
 
-  // True when the robot is on the same half of the field as the hub it's aiming at, i.e.
-  // legally inside its own alliance zone. This gates hub shots on POSITION, not just
-  // distance: without it a robot could cross the midline and still be within 5 m of its
-  // hub (the hub sits ~4.6 m in and the range is 5 m, so the circle spills past center).
+  // True when the robot is legally inside its own alliance zone. This gates hub shots on
+  // POSITION, not just distance: without it a robot could stand past the barrier and still
+  // be within 5 m of its hub.
+  //
+  // The hub sits ON the alliance-zone line (it's part of the barrier structure), so the
+  // zone is everything between your wall and the hub's X -- the robot must be on the wall
+  // side of the hub. Blue's hub (x=4.625) is near the x=0 wall, so its zone is robotX <=
+  // hubX; red's hub (x=11.925) is near the far wall, so its zone is robotX >= hubX. Which
+  // wall the hub belongs to is simply which half of the field it's on.
   //
   // The pose is in absolute blue-origin field coordinates and does NOT flip by alliance --
-  // that's why getHubPosition() keeps two hub positions and picks one. So we can't just say
-  // "x < center": that's only right for blue. Instead we compare the robot's half to the
-  // TARGET HUB's half, which stays correct for both alliances and mirrors exactly which hub
-  // getHubPosition() chose (alliance hub with FMS, nearest hub in the shop).
+  // that's why getHubPosition() keeps two hub positions and picks one. Reusing it here means
+  // this gate always matches the hub the aiming actually chose (alliance hub with FMS,
+  // nearest hub in the shop).
   private boolean isInAllianceZone() {
     double fieldCenterX = kFieldLength / 2.0;
     double robotX = m_drivetrain.getState().Pose.getX();
     double hubX = m_drivetrain.getHubPosition().getX();
-    boolean hubOnBlueHalf = hubX < fieldCenterX;
-    boolean robotOnBlueHalf = robotX < fieldCenterX;
-    return hubOnBlueHalf == robotOnBlueHalf;
+    return hubX < fieldCenterX ? robotX <= hubX : robotX >= hubX;
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when
