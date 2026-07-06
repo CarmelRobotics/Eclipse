@@ -3,29 +3,29 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 5.95,
-        "y": 4.0
+        "x": 8.248783625730992,
+        "y": 3.944830409356726
       },
       "prevControl": null,
       "nextControl": {
-        "x": 6.9,
-        "y": 3.7
+        "x": 7.386678362573097,
+        "y": 4.001046783625732
       },
       "isLocked": false,
-      "linkedName": "cycle2 shoot spot"
+      "linkedName": "BLUE_RIGHT_PASS_FAR_MID_FIELD"
     },
     {
       "anchor": {
-        "x": 8.3,
-        "y": 3.3
+        "x": 5.9,
+        "y": 4.0
       },
       "prevControl": {
-        "x": 7.4,
-        "y": 3.5
+        "x": 6.581035087719291,
+        "y": 4.035
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "third bite end"
+      "linkedName": "BLUE_RIGHT_PASS_NEAR_MID_FIELD"
     }
   ],
   "rotationTargets": [],
@@ -33,22 +33,22 @@
   "pointTowardsZones": [],
   "eventMarkers": [],
   "globalConstraints": {
-    "maxVelocity": 4.5,
-    "maxAcceleration": 4.0,
+    "maxVelocity": 4.96,
+    "maxAcceleration": 10.0,
     "maxAngularVelocity": 540.0,
     "maxAngularAcceleration": 720.0,
     "nominalVoltage": 12.0,
     "unlimited": false
   },
   "goalEndState": {
-    "velocity": 0,
-    "rotation": 200.0
+    "velocity": 2.0,
+    "rotation": -154.12585259161824
   },
   "reversed": false,
   "folder": null,
   "idealStartingState": {
     "velocity": 0,
-    "rotation": 178.5
+    "rotation": -170.32173994686607
   },
-  "useDefaultConstraints": false
+  "useDefaultConstraints": true
 }

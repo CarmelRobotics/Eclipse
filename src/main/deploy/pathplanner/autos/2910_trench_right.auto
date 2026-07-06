@@ -19,19 +19,25 @@
         {
           "type": "path",
           "data": {
-            "pathName": "trenchSweepCollect"
+            "pathName": "BLUE_RIGHT_PASS_PRELOAD_STARTING_TO_RIGHT_PASS_FAR_MID_FIELD"
           }
         },
         {
           "type": "path",
           "data": {
-            "pathName": "trenchSweepToHub"
+            "pathName": "BLUE_RIGHT_PASS_FAR_MID_FIELD_TO_RIGHT_PASS_NEAR_MID_FIELD"
           }
         },
         {
-          "type": "named",
+          "type": "path",
           "data": {
-            "name": "intake retract"
+            "pathName": "BLUE_RIGHT_PASS_NEAR_MID_FIELD_TO_RIGHT_TRENCH_RETURN"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_TRENCH_RETURN_TO_RIGHT_SCORE"
           }
         },
         {
@@ -41,13 +47,13 @@
               {
                 "type": "named",
                 "data": {
-                  "name": "shoot"
+                  "name": "dump"
                 }
               },
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 3.0
+                  "waitTime": 4.0
                 }
               }
             ]

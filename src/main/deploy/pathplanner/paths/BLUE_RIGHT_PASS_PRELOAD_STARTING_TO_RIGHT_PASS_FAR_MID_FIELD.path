@@ -4,45 +4,56 @@
     {
       "anchor": {
         "x": 4.4,
-        "y": 7.3
+        "y": 0.7
       },
       "prevControl": null,
       "nextControl": {
-        "x": 5.0,
-        "y": 6.0
+        "x": 8.911795321637426,
+        "y": 0.4706491228070194
       },
       "isLocked": false,
-      "linkedName": "trench start"
+      "linkedName": "BLUE_RIGHT_SCORE_PRELOAD_STARTING"
     },
     {
       "anchor": {
-        "x": 5.95,
-        "y": 4.0
+        "x": 8.248783625730992,
+        "y": 3.944830409356726
       },
       "prevControl": {
-        "x": 5.5,
-        "y": 5.0
+        "x": 8.476859649122806,
+        "y": 1.2132222222222229
       },
       "nextControl": null,
       "isLocked": false,
-      "linkedName": "trench sweep shoot spot"
+      "linkedName": "BLUE_RIGHT_PASS_FAR_MID_FIELD"
     }
   ],
   "rotationTargets": [],
   "constraintZones": [],
-  "pointTowardsZones": [],
+  "pointTowardsZones": [
+    {
+      "fieldPosition": {
+        "x": 2.0,
+        "y": 2.5
+      },
+      "rotationOffset": 0.0,
+      "minWaypointRelativePos": 0.26289752650176673,
+      "maxWaypointRelativePos": 1.0,
+      "name": "Point Towards Zone"
+    }
+  ],
   "eventMarkers": [],
   "globalConstraints": {
-    "maxVelocity": 3.0,
-    "maxAcceleration": 3.0,
+    "maxVelocity": 4.96,
+    "maxAcceleration": 10.0,
     "maxAngularVelocity": 540.0,
     "maxAngularAcceleration": 720.0,
     "nominalVoltage": 12.0,
     "unlimited": false
   },
   "goalEndState": {
-    "velocity": 0,
-    "rotation": 178.5
+    "velocity": 2.0,
+    "rotation": -170.32173994686607
   },
   "reversed": false,
   "folder": null,

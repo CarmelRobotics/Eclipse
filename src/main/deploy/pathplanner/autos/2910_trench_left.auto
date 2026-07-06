@@ -19,13 +19,25 @@
         {
           "type": "path",
           "data": {
-            "pathName": "trenchSweepCollect"
+            "pathName": "BLUE_LEFT_PASS_PRELOAD_STARTING_TO_LEFT_PASS_FAR_MID_FIELD"
           }
         },
         {
           "type": "path",
           "data": {
-            "pathName": "trenchSweepToHub"
+            "pathName": "BLUE_LEFT_PASS_FAR_MID_FIELD_TO_LEFT_PASS_NEAR_MID_FIELD"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_LEFT_PASS_NEAR_MID_FIELD_TO_LEFT_TRENCH_RETURN"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_LEFT_TRENCH_RETURN_TO_LEFT_SCORE"
           }
         },
         {
@@ -41,47 +53,10 @@
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 3.0
+                  "waitTime": 4.0
                 }
               }
             ]
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "trenchCycle2Collect"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "trenchCycle2ToHub"
-          }
-        },
-        {
-          "type": "race",
-          "data": {
-            "commands": [
-              {
-                "type": "named",
-                "data": {
-                  "name": "dump"
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 3.0
-                }
-              }
-            ]
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "trenchThirdBite"
           }
         },
         {
