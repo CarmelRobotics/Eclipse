@@ -87,6 +87,13 @@ public class RobotContainer {
 
   private Rotation2d m_assistLockHeading = null;
 
+  // === Simulation pose setter (dashboard-based) ===
+  // Set the robot's pose on the field without needing the separate sim GUI. Edit these
+  // dashboard values, then click "Sim/Apply Pose" to teleport the robot there.
+  private final LoggedTunableNumber m_simPoseX = new LoggedTunableNumber("Sim/PoseX", 4.6);
+  private final LoggedTunableNumber m_simPoseY = new LoggedTunableNumber("Sim/PoseY", 0.75);
+  private final LoggedTunableNumber m_simPoseHeadingDeg = new LoggedTunableNumber("Sim/PoseHeadingDeg", 0);
+
   private final SendableChooser<Command> autoSelection;
 
   public RobotContainer() {
@@ -246,6 +253,17 @@ public class RobotContainer {
     // Clear jam: reverse flywheel and indexer to back out a stuck ball.
     // Hold the button until the jam clears, then release.
     m_controller.b().whileTrue(m_shooter.clearJamCommand());
+
+    // === Simulation pose setter (dashboard button) ===
+    // Edit Sim/PoseX, Sim/PoseY, Sim/PoseHeadingDeg on the dashboard, then click
+    // Sim/ApplyPose to teleport the robot there. All dashboard-driven, no controller.
+    SmartDashboard.putData("Sim/ApplyPose", Commands.runOnce(() -> {
+      m_drivetrain.resetPose(new edu.wpi.first.math.geometry.Pose2d(
+        m_simPoseX.get(),
+        m_simPoseY.get(),
+        Rotation2d.fromDegrees(m_simPoseHeadingDeg.get())
+      ));
+    }, m_drivetrain));
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when

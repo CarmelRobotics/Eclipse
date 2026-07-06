@@ -8,20 +8,20 @@
       },
       "prevControl": null,
       "nextControl": {
-        "x": 1.9317976190476198,
-        "y": 7.619809523809524
+        "x": 2.24485172004745,
+        "y": 6.719418742586003
       },
       "isLocked": false,
       "linkedName": "BLUE_LEFT_TRENCH_RETURN"
     },
     {
       "anchor": {
-        "x": 0.6468809523809531,
-        "y": 4.866416666666667
+        "x": 2.7182562277580082,
+        "y": 5.503629893238434
       },
       "prevControl": {
-        "x": 0.36614285714285794,
-        "y": 7.684595238095237
+        "x": 2.4385172004744966,
+        "y": 6.805492289442467
       },
       "nextControl": null,
       "isLocked": false,
@@ -67,7 +67,7 @@
   },
   "goalEndState": {
     "velocity": 0,
-    "rotation": -16.14433878028363
+    "rotation": -36.32682595212029
   },
   "reversed": false,
   "folder": null,
