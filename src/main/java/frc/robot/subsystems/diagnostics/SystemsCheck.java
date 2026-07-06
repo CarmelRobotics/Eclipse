@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.ctre.phoenix6.hardware.ParentDevice;
 
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -47,6 +48,8 @@ public class SystemsCheck extends SubsystemBase {
     private static final double kHeartbeatStaleSeconds = 1.0;
 
     private final CommandSwerveDrivetrain m_drivetrain;
+    private final Shooter m_shooter;
+    private final Lintake m_lintake;
     // Every CTRE device on the robot, keyed by a stable human-readable name.
     private final Map<String, ParentDevice> m_devices = new LinkedHashMap<>();
 
@@ -56,6 +59,8 @@ public class SystemsCheck extends SubsystemBase {
 
     public SystemsCheck(CommandSwerveDrivetrain drivetrain, Shooter shooter, Lintake lintake) {
         m_drivetrain = drivetrain;
+        m_shooter = shooter;
+        m_lintake = lintake;
 
         // Drivetrain: 4 modules x (drive motor + steer motor + CANcoder), plus the Pigeon.
         String[] corners = {"FrontLeft", "FrontRight", "BackLeft", "BackRight"};
@@ -180,5 +185,41 @@ public class SystemsCheck extends SubsystemBase {
             pass ? "PASS" : ("FAIL: " + issues + " issue" + (issues == 1 ? "" : "s")));
         SmartDashboard.putString("SystemsCheck/Report",
             pass ? "All systems nominal" : report.toString().trim());
+    }
+
+    /**
+     * Active motor test: actually spins every mechanism (shooter, intake) and the drivetrain
+     * one at a time and verifies each motor's encoder responds, catching a
+     * connected-but-mechanically-dead motor that the static check can't see.
+     *
+     * <p><b>The robot moves</b> -- the drivetrain step drives forward briefly, so run this
+     * only with the robot on blocks or a clear runway. It's a deliberate dashboard button,
+     * never auto-run. Motors only move when enabled, so if the robot is disabled this reports
+     * SKIPPED and does nothing rather than false-failing on motors that can't move.
+     */
+    public Command motorTestCommand() {
+        Command sequence = Commands.sequence(
+            Commands.runOnce(() -> SmartDashboard.putString(
+                "SystemsCheck/MotorTest/Result", "RUNNING - stand clear, robot will move")),
+            m_shooter.selfTestCommand(),
+            m_lintake.selfTestCommand(),
+            m_drivetrain.selfTestCommand(),
+            Commands.runOnce(this::summarizeMotorTest)
+        );
+        return Commands.either(
+            sequence,
+            Commands.runOnce(() -> SmartDashboard.putString(
+                "SystemsCheck/MotorTest/Result", "SKIPPED - enable the robot (Teleop or Test) first")),
+            DriverStation::isEnabled
+        ).withName("MotorTest");
+    }
+
+    private void summarizeMotorTest() {
+        boolean pass = SmartDashboard.getBoolean("SystemsCheck/Shooter/Pass", false)
+            && SmartDashboard.getBoolean("SystemsCheck/Lintake/Pass", false)
+            && SmartDashboard.getBoolean("SystemsCheck/Drive/Pass", false);
+        SmartDashboard.putBoolean("SystemsCheck/MotorTest/Pass", pass);
+        SmartDashboard.putString("SystemsCheck/MotorTest/Result",
+            pass ? "PASS" : "FAIL - see the SystemsCheck/* per-motor flags");
     }
 }

@@ -7,6 +7,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
@@ -42,6 +43,55 @@ public class Lintake extends SubsystemBase {
         devices.put("Lintake/PinionFollower", m_followerPinionMotor);
         devices.put("Lintake/Roller", m_rollerMotor);
         return devices;
+    }
+
+    // === Active self-test (pit motor test) ===
+    // Spins the roller and deploys the pinion, verifying each motor's encoder responds so a
+    // mechanically dead motor is caught. State-driven (MotionMagic for the pinion) so nothing
+    // is slammed open-loop. Only meaningful while enabled; SystemsCheck guards that.
+    // Publishes pass/fail per motor under SystemsCheck/Lintake/*.
+    public Command selfTestCommand() {
+        final double[] startLeader = new double[1];
+        final double[] startFollower = new double[1];
+        return Commands.sequence(
+            // --- Roller: run intake, confirm it turns ---
+            runOnce(() -> {
+                SmartDashboard.putString("SystemsCheck/Lintake/Status", "roller spinning");
+                setState(RollerState.INTAKE);
+            }),
+            Commands.waitSeconds(0.6),
+            runOnce(() -> {
+                SmartDashboard.putBoolean("SystemsCheck/Lintake/Roller",
+                    Math.abs(m_rollerMotor.getVelocity().getValueAsDouble()) > 5.0);
+                setState(RollerState.ZERO);
+            }),
+            // --- Pinion: deploy to GROUND and back, confirm both motors travel ---
+            runOnce(() -> {
+                SmartDashboard.putString("SystemsCheck/Lintake/Status", "pinion deploying");
+                startLeader[0] = m_leaderPinionMotor.getPosition().getValueAsDouble();
+                startFollower[0] = m_followerPinionMotor.getPosition().getValueAsDouble();
+                setPinionState(PinionState.GROUND);
+            }),
+            Commands.waitSeconds(1.2),
+            runOnce(() -> {
+                SmartDashboard.putBoolean("SystemsCheck/Lintake/PinionLeader",
+                    Math.abs(m_leaderPinionMotor.getPosition().getValueAsDouble() - startLeader[0]) > 1.0);
+                SmartDashboard.putBoolean("SystemsCheck/Lintake/PinionFollower",
+                    Math.abs(m_followerPinionMotor.getPosition().getValueAsDouble() - startFollower[0]) > 1.0);
+                setPinionState(PinionState.STOW);
+            }),
+            Commands.waitSeconds(1.0),
+            runOnce(() -> {
+                boolean pass = SmartDashboard.getBoolean("SystemsCheck/Lintake/Roller", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Lintake/PinionLeader", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Lintake/PinionFollower", false);
+                SmartDashboard.putBoolean("SystemsCheck/Lintake/Pass", pass);
+                SmartDashboard.putString("SystemsCheck/Lintake/Status", pass ? "PASS" : "FAIL");
+            })
+        ).finallyDo(() -> {
+            setState(RollerState.ZERO);
+            setPinionState(PinionState.STOW);
+        });
     }
 
     public Command setState(PinionState pinionState) {

@@ -35,6 +35,7 @@ import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
@@ -562,6 +563,60 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 <= robot.getDistance(ShooterConstants.kRedHubPosition)
             ? ShooterConstants.kBlueHubPosition
             : ShooterConstants.kRedHubPosition;
+    }
+
+    // === Active self-test (pit motor test) ===
+    // Rotates all four modules in place (steer test), then briefly drives forward (drive
+    // test -- THE ROBOT MOVES; keep it on blocks or with a clear runway). Verifies each
+    // module's steer angle reaches the commanded direction and each drive wheel actually
+    // turns. Only meaningful while enabled; SystemsCheck guards that. Publishes pass/fail
+    // per module under SystemsCheck/Drive/*.
+    public Command selfTestCommand() {
+        final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
+        final SwerveRequest.RobotCentric roll = new SwerveRequest.RobotCentric()
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+        final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
+        return Commands.sequence(
+            runOnce(() -> SmartDashboard.putString("SystemsCheck/Drive/Status",
+                "steer test - wheels rotating in place")),
+            applyRequest(() -> point.withModuleDirection(Rotation2d.fromDegrees(90))).withTimeout(0.9),
+            runOnce(() -> checkSteerReached(90.0)),
+            applyRequest(() -> point.withModuleDirection(Rotation2d.kZero)).withTimeout(0.6),
+            runOnce(() -> SmartDashboard.putString("SystemsCheck/Drive/Status",
+                "DRIVE test - ROBOT WILL MOVE")),
+            applyRequest(() -> roll.withVelocityX(0.4).withVelocityY(0.0).withRotationalRate(0.0)).withTimeout(0.5),
+            runOnce(this::checkDriveMoving),
+            applyRequest(() -> brake).withTimeout(0.4),
+            runOnce(() -> {
+                boolean pass = true;
+                for (String corner : kSelfTestCorners) {
+                    pass = pass
+                        && SmartDashboard.getBoolean("SystemsCheck/Drive/" + corner + "/Steer", false)
+                        && SmartDashboard.getBoolean("SystemsCheck/Drive/" + corner + "/Drive", false);
+                }
+                SmartDashboard.putBoolean("SystemsCheck/Drive/Pass", pass);
+                SmartDashboard.putString("SystemsCheck/Drive/Status", pass ? "PASS" : "FAIL");
+            })
+        ).finallyDo(() -> setControl(new SwerveRequest.Idle()));
+    }
+
+    private static final String[] kSelfTestCorners = {"FrontLeft", "FrontRight", "BackLeft", "BackRight"};
+
+    // Each module's steer angle is within tolerance of the commanded direction.
+    private void checkSteerReached(double targetDeg) {
+        for (int i = 0; i < kSelfTestCorners.length; i++) {
+            double angleDeg = getModule(i).getCurrentState().angle.getDegrees();
+            double errDeg = Math.abs(MathUtil.inputModulus(angleDeg - targetDeg, -180.0, 180.0));
+            SmartDashboard.putBoolean("SystemsCheck/Drive/" + kSelfTestCorners[i] + "/Steer", errDeg < 10.0);
+        }
+    }
+
+    // Each module's drive wheel is actually turning.
+    private void checkDriveMoving() {
+        for (int i = 0; i < kSelfTestCorners.length; i++) {
+            double speed = Math.abs(getModule(i).getCurrentState().speedMetersPerSecond);
+            SmartDashboard.putBoolean("SystemsCheck/Drive/" + kSelfTestCorners[i] + "/Drive", speed > 0.1);
+        }
     }
 
     public ChassisSpeeds getFieldRelativeSpeeds() {

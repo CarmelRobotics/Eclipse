@@ -283,6 +283,12 @@ public class RobotContainer {
     // the live Faults/* flags update every loop regardless.
     SmartDashboard.putData("SystemsCheck/Run", m_systemsCheck.fullCheckCommand());
     RobotModeTriggers.test().onTrue(m_systemsCheck.fullCheckCommand());
+
+    // Active motor test: actually spins every mechanism + the drivetrain one at a time to
+    // catch a connected-but-dead motor. THE ROBOT MOVES (drivetrain step) -- keep it on
+    // blocks or a clear runway. Deliberate button only, never auto-run, and it no-ops unless
+    // the robot is enabled. Per-motor PASS/FAIL lands under SystemsCheck/*.
+    SmartDashboard.putData("SystemsCheck/RunMotorTest", m_systemsCheck.motorTestCommand());
   }
 
   // True when the robot is legally inside its own alliance zone. This gates hub shots on

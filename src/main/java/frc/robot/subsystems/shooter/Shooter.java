@@ -204,6 +204,15 @@ public class Shooter extends SubsystemBase {
         m_followerPivotMotor.getSupplyCurrent().setUpdateFrequency(50);
         m_indexerMotor.getSupplyCurrent().setUpdateFrequency(50);
 
+        // Follower velocities + follower pivot position + indexer velocity: enabled so the
+        // active self-test can confirm each of those motors actually turns. optimizeBusUtilization
+        // below would otherwise freeze them (they aren't read anywhere in normal operation).
+        m_backLeftFollowerShooterMotor.getVelocity().setUpdateFrequency(50);
+        m_rightFollowerShooterMotor.getVelocity().setUpdateFrequency(50);
+        m_backRightFollowerShooterMotor.getVelocity().setUpdateFrequency(50);
+        m_followerPivotMotor.getPosition().setUpdateFrequency(50);
+        m_indexerMotor.getVelocity().setUpdateFrequency(50);
+
         m_indexerMotor.optimizeBusUtilization();
         m_leaderPivotMotor.optimizeBusUtilization();
         m_followerPivotMotor.optimizeBusUtilization();
@@ -264,6 +273,83 @@ public class Shooter extends SubsystemBase {
             },
             this
         );
+    }
+
+    // === Active self-test (pit motor test) ===
+    // Runs each motor through a brief, real motion and verifies its encoder responds, so a
+    // motor that's on the bus but mechanically dead (stripped gear, blown phase, seized) is
+    // caught -- the connectivity check alone can't see that. Drives through the normal
+    // state-based control paths (closed-loop velocity, MotionMagic position) so nothing is
+    // ever commanded open-loop into a hard stop. Only meaningful while enabled; SystemsCheck
+    // guards that. Publishes pass/fail per motor under SystemsCheck/Shooter/*.
+    public Command selfTestCommand() {
+        final double[] startPivotOutput = new double[1];
+        return Commands.sequence(
+            // --- Flywheels: spin all four to the LOB speed, then confirm each one turns ---
+            runOnce(() -> {
+                SmartDashboard.putString("SystemsCheck/Shooter/Status", "flywheels spinning");
+                setState(ShooterState.LOB);
+            }),
+            Commands.waitSeconds(1.0),
+            runOnce(() -> {
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/FlywheelLeftLeader",
+                    Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble()) > 5.0);
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/FlywheelBackLeft",
+                    Math.abs(m_backLeftFollowerShooterMotor.getVelocity().getValueAsDouble()) > 5.0);
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/FlywheelRight",
+                    Math.abs(m_rightFollowerShooterMotor.getVelocity().getValueAsDouble()) > 5.0);
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/FlywheelBackRight",
+                    Math.abs(m_backRightFollowerShooterMotor.getVelocity().getValueAsDouble()) > 5.0);
+                setState(ShooterState.ZERO);
+            }),
+            // --- Indexer: feed briefly, confirm it turns ---
+            runOnce(() -> {
+                SmartDashboard.putString("SystemsCheck/Shooter/Status", "indexer feeding");
+                setState(IndexerState.SCORE);
+            }),
+            Commands.waitSeconds(0.5),
+            runOnce(() -> {
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/Indexer",
+                    Math.abs(m_indexerMotor.getVelocity().getValueAsDouble()) > 5.0);
+                setState(IndexerState.ZERO);
+            }),
+            // --- Pivot: drive to the shot-block angle and back, confirm both motors travel ---
+            runOnce(() -> {
+                SmartDashboard.putString("SystemsCheck/Shooter/Status", "pivot moving");
+                startPivotOutput[0] = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+                setState(PivotState.SHOT_BLOCK);
+            }),
+            Commands.waitSeconds(0.9),
+            runOnce(() -> {
+                double leaderMoved = Math.abs(
+                    m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio
+                    - startPivotOutput[0]);
+                double followerMoved = Math.abs(
+                    m_followerPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio
+                    - startPivotOutput[0]);
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/PivotLeader", leaderMoved > 0.1);
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/PivotFollower", followerMoved > 0.1);
+                setState(PivotState.STOW);
+            }),
+            Commands.waitSeconds(0.6),
+            runOnce(() -> {
+                boolean pass =
+                    SmartDashboard.getBoolean("SystemsCheck/Shooter/FlywheelLeftLeader", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Shooter/FlywheelBackLeft", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Shooter/FlywheelRight", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Shooter/FlywheelBackRight", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Shooter/Indexer", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Shooter/PivotLeader", false)
+                    && SmartDashboard.getBoolean("SystemsCheck/Shooter/PivotFollower", false);
+                SmartDashboard.putBoolean("SystemsCheck/Shooter/Pass", pass);
+                SmartDashboard.putString("SystemsCheck/Shooter/Status", pass ? "PASS" : "FAIL");
+            })
+        ).finallyDo(() -> {
+            // Always leave the shooter safe, even if the test is interrupted.
+            setState(IndexerState.ZERO);
+            setState(ShooterState.ZERO);
+            setState(PivotState.STOW);
+        });
     }
 
     // Idle (ZERO-state) flywheel speed. Pre-spins near the hub for fast spin-up, but
