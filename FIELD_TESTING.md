@@ -65,6 +65,8 @@ write numbers down IN THIS DOC (or a photo of it) so tuning survives the drive h
       heading keeps tracking the hub
 - [ ] `aim/auto mode` reads HUB inside the zone within 5 m; drive past your hub's
       X-line → flips to PASS; `aim/in alliance zone` flips false
+      (mode also requires `our hub active` — always true in practice with no game
+      data; in a real match RT auto-ferries during the opponent's SHIFT)
 - [ ] `dist to hub` vs tape measure at your marked spot: within ~0.2 m
       (if this is wrong, DO NOT tune shots — fix pose first, everything depends on it)
 
@@ -72,6 +74,13 @@ write numbers down IN THIS DOC (or a photo of it) so tuning survives the drive h
 
 Setup: tape marks at 1.5 / 2.5 / 3.5 / 4.5 / 5.0 m from hub center. ~5 balls per
 mark. Hold RT until the shot fires (rumble = locked). Watch where balls land.
+
+Every detected shot auto-logs its full solution: glance at the **`last shot`**
+dashboard string right after each ball (distance, RPS, pivot, heading error, and
+the trims in effect) — note where it landed next to that. The same snapshots are
+in the WPILOG under `Shooter/ShotEvent/*` (step through `Number` in
+AdvantageScope), so the calibration data survives even if the table below doesn't
+get filled in.
 
 **Current table (what the code will do):**
 
@@ -185,6 +194,8 @@ Agitate is automatic during shots (pinion bounces AGITATE↔GROUND while feeding
 | `vision/pose resets` | flat while tags visible |
 | `dist to hub` | matches tape measure |
 | `aim/auto mode`, `aim/in alliance zone` | HUB + true inside zone |
+| `our hub active` | true in practice; alternates during match SHIFTS |
+| `last shot` | full solution of the most recent shot (see §5) |
 | `ready/shot in range·aimed·spun up·pivot` | the shot-hang diagnosis set |
 | `assist/zone` | NONE / *_NEAR / *_IN as you move |
 | `ShotTuning/*` | live trims (see §5/§6) |

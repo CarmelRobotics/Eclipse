@@ -229,8 +229,14 @@ public class RobotContainer {
                 heldPassCommand(),
                 rumbleWhenReady(m_shooter::readyToPass)
             ),
+            // HUB only when it would actually score: in range, legally in our zone, and our
+            // hub active per the SHIFTS game data (shop/no-game-data defaults to active, so
+            // practice is unaffected). During the opponent's shift the same pull ferries
+            // instead of wasting balls on a dead hub. Latches at the pull like everything
+            // else -- a shift flip mid-hold doesn't yank the mode out from under the driver.
             () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
                 && m_drivetrain.isInAllianceZone()
+                && m_drivetrain.isOurHubActive()
         )
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.

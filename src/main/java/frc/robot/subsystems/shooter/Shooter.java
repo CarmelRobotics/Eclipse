@@ -510,6 +510,7 @@ public class Shooter extends SubsystemBase {
                 } else if (m_inDip && rpsBelowTarget < m_shotRecoverRps.get()) {
                     m_inDip = false;
                     m_shotCount++;  // dip-recovery complete; count a shot
+                    logShotEvent(commandedRps, actualRps, shotDistance);
                 }
             }
         } else {
@@ -629,6 +630,38 @@ public class Shooter extends SubsystemBase {
     /** Number of balls detected leaving the flywheel (via velocity dip) since boot. */
     public int getShotCount() {
         return m_shotCount;
+    }
+
+    // === Shot-event snapshot ===
+    // One discrete record per detected shot, capturing the whole firing solution PLUS the
+    // live trims in effect at that moment. This is the calibration record: after a field
+    // session, step through Shooter/ShotEvent/Number in AdvantageScope and read each shot's
+    // conditions directly instead of scrubbing continuous traces for the instant a ball
+    // left. The "last shot" dashboard string shows the same at the field, right after the
+    // ball lands -- note where it landed, glance at the string, and the tuning table row
+    // writes itself. Logging the offsets matters most: a shot that landed perfectly with
+    // RpsOffset=+2 means the TABLE is 2 RPS low there; without recording the trim, the
+    // post-session bake-in is guesswork.
+    private void logShotEvent(double commandedRps, double actualRps, double shotDistance) {
+        // Passes care about the ferry distance, not the hub distance.
+        double distance = m_shooterState == ShooterState.PASS ? m_drive.getPassDistance() : shotDistance;
+        double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        double headingErrDeg = m_drive.getHubHeadingError().getDegrees();
+        DogLog.log("Shooter/ShotEvent/Number", m_shotCount);
+        DogLog.log("Shooter/ShotEvent/Mode", m_shooterState.toString());
+        DogLog.log("Shooter/ShotEvent/DistanceM", distance);
+        DogLog.log("Shooter/ShotEvent/CommandedRps", commandedRps);
+        DogLog.log("Shooter/ShotEvent/ActualRps", actualRps);
+        DogLog.log("Shooter/ShotEvent/PivotRot", pivotOutputRot);
+        DogLog.log("Shooter/ShotEvent/HeadingErrorDeg", headingErrDeg);
+        DogLog.log("Shooter/ShotEvent/RpsOffset", m_shooterRpsOffset.get());
+        DogLog.log("Shooter/ShotEvent/PivotOffset", m_pivotOffset.get());
+        DogLog.log("Shooter/ShotEvent/PassRpsOffset", m_passRpsOffset.get());
+        DogLog.log("Shooter/ShotEvent/BatteryVolts", RobotController.getBatteryVoltage());
+        SmartDashboard.putString("last shot", String.format(
+            "#%d %s %.2f m | rps %.1f | pivot %.3f | hdg %.1f deg | trim rps %+.1f piv %+.3f",
+            m_shotCount, m_shooterState, distance, commandedRps, pivotOutputRot,
+            headingErrDeg, m_shooterRpsOffset.get(), m_pivotOffset.get()));
     }
 
     /** Commands both pivot motors to a target given in output (pivot) rotations. */

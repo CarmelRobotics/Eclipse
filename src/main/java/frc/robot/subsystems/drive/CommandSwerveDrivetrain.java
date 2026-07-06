@@ -453,24 +453,39 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("pass/target x", passTarget.getX());
         SmartDashboard.putNumber("pass/target y", passTarget.getY());
         SmartDashboard.putNumber("pass/distance", getPassDistance());
+        // Hub-active state per the 2026 SHIFTS game data (cached for isOurHubActive(), which
+        // gates the right-trigger context choice). Computed BEFORE the aim/auto mode string
+        // below so the dashboard mirrors the exact condition a trigger pull would evaluate.
+        double matchTime = DriverStation.getMatchTime();
+        String gameData = DriverStation.getGameSpecificMessage();
+        m_ourHubActive = computeOurHubActive(matchTime, gameData);
+        SmartDashboard.putBoolean("our hub active", m_ourHubActive);
+
         // What a right-trigger pull would do right now (the choice latches at the pull).
-        // Mirrors the binding's condition exactly: in range AND inside the alliance zone.
+        // Mirrors the binding's condition exactly: in range AND in the alliance zone AND
+        // our hub is active (during the opponent's shift a hub shot scores nothing, so
+        // the pull ferries instead).
         boolean inAllianceZone = isInAllianceZone();
         SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
         SmartDashboard.putString("aim/auto mode",
-            getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters && inAllianceZone
+            getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
+                && inAllianceZone && m_ourHubActive
                 ? "HUB" : "PASS");
-        // Publish which alliance's hub is currently active per 2026 Game Data logic
-        double matchTime = DriverStation.getMatchTime();
-        String gameData = DriverStation.getGameSpecificMessage();
-
-        boolean ourHubActive = computeOurHubActive(matchTime, gameData);
-        SmartDashboard.putBoolean("our hub active", ourHubActive);
 
         // Compute which alliance currently has active hub (Blue or Red)
         boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
         String activeAlliance = blueHubActive ? "Blue" : "Red";
         SmartDashboard.putString("active hub alliance", activeAlliance);
+    }
+
+    // Cached each loop in periodic(). Defaults true so nothing is gated before the first
+    // loop runs.
+    private boolean m_ourHubActive = true;
+
+    /** Whether our hub currently scores (2026 SHIFTS game data). True in auto, true in the
+     *  shop (no game data -> assume active), false during the opponent's teleop shift. */
+    public boolean isOurHubActive() {
+        return m_ourHubActive;
     }
 
     private boolean computeOurHubActive(double matchTime, String gameData) {
