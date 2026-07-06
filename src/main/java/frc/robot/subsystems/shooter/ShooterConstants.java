@@ -53,6 +53,9 @@ public final class ShooterConstants {
     // out to save the continuous 4-motor draw. Generous enough to be fully spun up before
     // you enter the 5 m shooting range.
     public static final double kIdleSpinMaxDistanceMeters = 6.5;
+    // Below this bus voltage, drop the flywheel idle-spin to protect the drivetrain
+    // (brownout floor is ~6.0-6.3 V; this leaves margin to react before we get there).
+    public static final double kIdleShedVoltage = 7.0;
     public static final double kLobShooterRps = 40;          // ferry shot (slower pass through field)
     public static final double kSendShooterRps = 90;         // long ferry shot (fast pass)
     public static final double kStowPivotPosition = 0;       // stow angle (output rotations)

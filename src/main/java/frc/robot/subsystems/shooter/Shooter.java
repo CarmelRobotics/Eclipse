@@ -10,6 +10,7 @@ import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
 
 import dev.doglog.DogLog;
+import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -247,6 +248,20 @@ public class Shooter extends SubsystemBase {
         );
     }
 
+    // Idle (ZERO-state) flywheel speed. Pre-spins near the hub for fast spin-up, but
+    // shuts off when either (a) far from the hub -- pure wasted draw, re-spins on
+    // approach -- or (b) the battery is already sagging. (b) is a brownout safety net:
+    // when the bus is under load, dropping the nice-to-have pre-spin protects the far
+    // more important thing, the drivetrain. A stalled-out drive is a lost match; a
+    // slightly slower spin-up is not. Coarse (instantaneous voltage, no debounce) on
+    // purpose -- the drum barely changes speed in the fraction of a second before the
+    // bus recovers, so latching would be over-engineering.
+    private double idleSpinRps() {
+        boolean nearHub = m_drive.getDistanceToClosestHub() <= ShooterConstants.kIdleSpinMaxDistanceMeters;
+        boolean batteryHealthy = RobotController.getBatteryVoltage() > ShooterConstants.kIdleShedVoltage;
+        return (nearHub && batteryHealthy) ? ShooterConstants.kIdleShooterRps : 0.0;
+    }
+
     public double getAvgShooterCurrentDraw() {
         double sum = m_leftLeaderShooterMotor.getSupplyCurrent().getValueAsDouble()
             + m_backLeftFollowerShooterMotor.getSupplyCurrent().getValueAsDouble()
@@ -357,12 +372,7 @@ public class Shooter extends SubsystemBase {
         // variable so shot detection below can measure actual vs. commanded to detect
         // the velocity dip when a ball passes through.
         double commandedRps = switch (m_shooterState) {
-            // Idle spin only pays off near the hub (faster spin-up to a shot). Far away --
-            // playing defense, ferrying across the field -- keeping the 4-motor drum
-            // turning is pure wasted draw, so let it coast to a full stop out there. It
-            // re-spins as you approach, well before you're in shooting range.
-            case ZERO -> m_drive.getDistanceToClosestHub() <= ShooterConstants.kIdleSpinMaxDistanceMeters
-                ? ShooterConstants.kIdleShooterRps : 0.0;
+            case ZERO -> idleSpinRps();
             case SCORE -> m_targetShooterRps;                // hub shot, distance-dependent
             case PASS -> m_targetPassRps;                    // ferry, distance-dependent
             case LOB -> ShooterConstants.kLobShooterRps;     // legacy fixed 40 RPS ferry
