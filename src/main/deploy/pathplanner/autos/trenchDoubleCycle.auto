@@ -1,0 +1,99 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "named",
+          "data": {
+            "name": "intake deploy"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake run"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchSweepCollect"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchSweepToHub"
+          }
+        },
+        {
+          "type": "race",
+          "data": {
+            "commands": [
+              {
+                "type": "named",
+                "data": {
+                  "name": "dump"
+                }
+              },
+              {
+                "type": "wait",
+                "data": {
+                  "waitTime": 3.0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchCycle2Collect"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchCycle2ToHub"
+          }
+        },
+        {
+          "type": "race",
+          "data": {
+            "commands": [
+              {
+                "type": "named",
+                "data": {
+                  "name": "dump"
+                }
+              },
+              {
+                "type": "wait",
+                "data": {
+                  "waitTime": 3.0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "trenchThirdBite"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}

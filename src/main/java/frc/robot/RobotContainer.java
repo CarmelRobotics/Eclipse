@@ -124,6 +124,9 @@ public class RobotContainer {
     NamedCommands.registerCommand("intake stop", Commands.runOnce(() -> m_lintake.setState(RollerState.ZERO)));
     // Shoot: prepare, wait until ready-or-timeout, feed. 1.5 s feed window in auto.
     NamedCommands.registerCommand("shoot", timedShotCommand(PivotState.SCORE, ShooterState.SCORE, 1.5));
+    // Dump: same, but a long 2.5 s feed to empty a full hopper (preload + a collect
+    // cycle) rather than the ~8-ball quick shot. Used by the multi-cycle trench autos.
+    NamedCommands.registerCommand("dump", timedShotCommand(PivotState.SCORE, ShooterState.SCORE, 2.5));
     NamedCommands.registerCommand("stopshoot", stopShooterCommand());
   }
 
