@@ -10,8 +10,11 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 
+import java.util.function.BooleanSupplier;
+
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -184,7 +187,10 @@ public class RobotContainer {
     );
 
     m_controller.a().whileTrue(
-        m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity)
+        Commands.parallel(
+            m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
+            rumbleWhenReady(m_shooter::readyToShoot)
+        )
     );
     // Right trigger: context-aware score. Inside hub range (5 m) -> full hub shot;
     // beyond it -> smart pass to the alliance-zone corner. The choice LATCHES at the
@@ -195,11 +201,13 @@ public class RobotContainer {
         Commands.either(
             Commands.parallel(
                 m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
-                heldShotCommand(PivotState.SCORE, ShooterState.SCORE)
+                heldShotCommand(PivotState.SCORE, ShooterState.SCORE),
+                rumbleWhenReady(m_shooter::readyToShoot)
             ),
             Commands.parallel(
                 m_drivetrain.facePassTargetCommand(this::shootingXVelocity, this::shootingYVelocity),
-                heldPassCommand()
+                heldPassCommand(),
+                rumbleWhenReady(m_shooter::readyToPass)
             ),
             () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
         )
@@ -321,6 +329,16 @@ public class RobotContainer {
         .withDeadband(Constants.kMaxSpeed * 0.1)
         .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
         .withTargetDirection(m_assistLockHeading);
+  }
+
+  // Buzz the controller while `ready` is true so the driver feels the exact window the
+  // shot is locked -- no need to watch the dashboard while driving and aiming. Steady
+  // (not pulsed) on purpose: it marks the whole valid firing window, not just the edge.
+  // Clears rumble on end (aim released) so it can never get stuck buzzing.
+  private Command rumbleWhenReady(BooleanSupplier ready) {
+    return Commands.run(
+        () -> m_controller.getHID().setRumble(RumbleType.kBothRumble, ready.getAsBoolean() ? 1.0 : 0.0)
+    ).finallyDo(() -> m_controller.getHID().setRumble(RumbleType.kBothRumble, 0.0));
   }
 
   private Command rollerWhileHeldCommand(RollerState state) {
