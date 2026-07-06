@@ -14,6 +14,8 @@ import java.util.function.BooleanSupplier;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -270,21 +272,23 @@ public class RobotContainer {
   // POSITION, not just distance: without it a robot could stand past the barrier and still
   // be within 5 m of its hub.
   //
+  // Which zone is "ours" comes from the driver-station alliance, NOT from which hub is
+  // nearest. DriverStation.getAlliance() returns the FMS-assigned alliance in a real match
+  // and the manually selected one in the shop, so this is alliance-driven in both cases --
+  // set the DS alliance to match the side you're practicing on.
+  //
   // The hub sits ON the alliance-zone line (it's part of the barrier structure), so the
   // zone is everything between your wall and the hub's X -- the robot must be on the wall
-  // side of the hub. Blue's hub (x=4.625) is near the x=0 wall, so its zone is robotX <=
-  // hubX; red's hub (x=11.925) is near the far wall, so its zone is robotX >= hubX. Which
-  // wall the hub belongs to is simply which half of the field it's on.
-  //
-  // The pose is in absolute blue-origin field coordinates and does NOT flip by alliance --
-  // that's why getHubPosition() keeps two hub positions and picks one. Reusing it here means
-  // this gate always matches the hub the aiming actually chose (alliance hub with FMS,
-  // nearest hub in the shop).
+  // side of it. Blue's hub (x=4.625) is near the x=0 wall, so its zone is robotX <= hubX;
+  // red's hub (x=11.925) is near the far wall, so its zone is robotX >= hubX. The pose is in
+  // absolute blue-origin coordinates and does NOT flip by alliance, which is why we pick the
+  // hub X explicitly per alliance here.
   private boolean isInAllianceZone() {
-    double fieldCenterX = kFieldLength / 2.0;
+    boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
     double robotX = m_drivetrain.getState().Pose.getX();
-    double hubX = m_drivetrain.getHubPosition().getX();
-    return hubX < fieldCenterX ? robotX <= hubX : robotX >= hubX;
+    double hubX = (red ? ShooterConstants.kRedHubPosition
+                       : ShooterConstants.kBlueHubPosition).getX();
+    return red ? robotX >= hubX : robotX <= hubX;
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when
