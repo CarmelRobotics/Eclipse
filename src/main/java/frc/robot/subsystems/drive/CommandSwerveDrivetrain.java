@@ -454,8 +454,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("pass/target y", passTarget.getY());
         SmartDashboard.putNumber("pass/distance", getPassDistance());
         // What a right-trigger pull would do right now (the choice latches at the pull).
+        // Mirrors the binding's condition exactly: in range AND inside the alliance zone.
+        boolean inAllianceZone = isInAllianceZone();
+        SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
         SmartDashboard.putString("aim/auto mode",
-            getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters ? "HUB" : "PASS");
+            getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters && inAllianceZone
+                ? "HUB" : "PASS");
         // Publish which alliance's hub is currently active per 2026 Game Data logic
         double matchTime = DriverStation.getMatchTime();
         String gameData = DriverStation.getGameSpecificMessage();
@@ -565,6 +569,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             : ShooterConstants.kRedHubPosition;
     }
 
+    // True when the robot is legally inside its own alliance zone; gates hub shots on
+    // POSITION, not just distance (a robot past the barrier can still be within 5 m of its
+    // hub). Which zone is "ours" comes from the driver-station alliance -- FMS-assigned in
+    // a match, manually selected in the shop -- and the hub sits ON the zone line, so the
+    // zone is everything between your wall and your hub's X. The pose is absolute
+    // blue-origin and does NOT flip by alliance, hence the explicit per-alliance hub X.
+    public boolean isInAllianceZone() {
+        boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        double robotX = getState().Pose.getX();
+        double hubX = (red ? ShooterConstants.kRedHubPosition
+                           : ShooterConstants.kBlueHubPosition).getX();
+        return red ? robotX >= hubX : robotX <= hubX;
+    }
+
     // === Active self-test (pit motor test) ===
     // Rotates all four modules in place (steer test), then briefly drives forward (drive
     // test -- THE ROBOT MOVES; keep it on blocks or with a clear runway). Verifies each
@@ -602,11 +620,15 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     private static final String[] kSelfTestCorners = {"FrontLeft", "FrontRight", "BackLeft", "BackRight"};
 
-    // Each module's steer angle is within tolerance of the commanded direction.
+    // Each module's steer angle is within tolerance of the commanded direction, folded to
+    // ±90: steer optimization may legally point a module 180 degrees opposite (with drive
+    // reversed) whenever that's the shorter rotation -- e.g. wheels left at X-lock's ±45
+    // flip when commanded to 90. Both orientations are a working steer motor, so the error
+    // is computed modulo 180 and a reversed module passes.
     private void checkSteerReached(double targetDeg) {
         for (int i = 0; i < kSelfTestCorners.length; i++) {
             double angleDeg = getModule(i).getCurrentState().angle.getDegrees();
-            double errDeg = Math.abs(MathUtil.inputModulus(angleDeg - targetDeg, -180.0, 180.0));
+            double errDeg = Math.abs(MathUtil.inputModulus(angleDeg - targetDeg, -90.0, 90.0));
             SmartDashboard.putBoolean("SystemsCheck/Drive/" + kSelfTestCorners[i] + "/Steer", errDeg < 10.0);
         }
     }

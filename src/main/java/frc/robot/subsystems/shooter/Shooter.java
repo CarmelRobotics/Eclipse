@@ -283,7 +283,9 @@ public class Shooter extends SubsystemBase {
     // ever commanded open-loop into a hard stop. Only meaningful while enabled; SystemsCheck
     // guards that. Publishes pass/fail per motor under SystemsCheck/Shooter/*.
     public Command selfTestCommand() {
-        final double[] startPivotOutput = new double[1];
+        // [0] = leader start, [1] = follower start -- each motor's travel is measured
+        // against its OWN encoder so a divergence between the two can't mask a dead motor.
+        final double[] startPivotOutput = new double[2];
         return Commands.sequence(
             // --- Flywheels: spin all four to the LOB speed, then confirm each one turns ---
             runOnce(() -> {
@@ -317,6 +319,7 @@ public class Shooter extends SubsystemBase {
             runOnce(() -> {
                 SmartDashboard.putString("SystemsCheck/Shooter/Status", "pivot moving");
                 startPivotOutput[0] = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+                startPivotOutput[1] = m_followerPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
                 setState(PivotState.SHOT_BLOCK);
             }),
             Commands.waitSeconds(0.9),
@@ -326,7 +329,7 @@ public class Shooter extends SubsystemBase {
                     - startPivotOutput[0]);
                 double followerMoved = Math.abs(
                     m_followerPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio
-                    - startPivotOutput[0]);
+                    - startPivotOutput[1]);
                 SmartDashboard.putBoolean("SystemsCheck/Shooter/PivotLeader", leaderMoved > 0.1);
                 SmartDashboard.putBoolean("SystemsCheck/Shooter/PivotFollower", followerMoved > 0.1);
                 setState(PivotState.STOW);

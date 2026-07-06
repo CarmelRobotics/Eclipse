@@ -10,14 +10,17 @@ import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.lintake.Lintake;
+import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.localisation.LimelightHelpers;
 import frc.robot.subsystems.localisation.LocalisationConstants;
 import frc.robot.subsystems.shooter.Shooter;
+import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 
 /**
  * Robot health diagnostics: a continuous no-motion fault monitor plus an on-demand pit
@@ -193,25 +196,44 @@ public class SystemsCheck extends SubsystemBase {
      * connected-but-mechanically-dead motor that the static check can't see.
      *
      * <p><b>The robot moves</b> -- the drivetrain step drives forward briefly, so run this
-     * only with the robot on blocks or a clear runway. It's a deliberate dashboard button,
-     * never auto-run. Motors only move when enabled, so if the robot is disabled this reports
-     * SKIPPED and does nothing rather than false-failing on motors that can't move.
+     * only with the robot on blocks or a clear runway, and <b>with no balls loaded</b> (the
+     * indexer step feeds toward a stopped drum; a leftover ball can wedge). It's a deliberate
+     * dashboard button, never auto-run.
+     *
+     * <p>Structure: the button command itself is a tiny always-runnable runOnce (the scheduler
+     * refuses to start anything motion-capable while disabled, so a plain guarded sequence
+     * would silently do NOTHING when clicked in the pit -- looking exactly like a broken
+     * button). The runOnce always executes: disabled, it reports SKIPPED; enabled, it
+     * schedules the real test.
      */
     public Command motorTestCommand() {
         Command sequence = Commands.sequence(
-            Commands.runOnce(() -> SmartDashboard.putString(
-                "SystemsCheck/MotorTest/Result", "RUNNING - stand clear, robot will move")),
+            // Start from a known configuration regardless of what the driver left behind
+            // (pivot at shot-block, intake deployed, ...), so every step measures from the
+            // same baseline and nothing starts inside another mechanism's envelope.
+            Commands.runOnce(() -> {
+                SmartDashboard.putString("SystemsCheck/MotorTest/Result",
+                    "RUNNING - robot will move; run on blocks with no balls loaded");
+                m_shooter.setState(PivotState.STOW);
+                m_lintake.setPinionState(PinionState.STOW);
+            }, m_shooter, m_lintake),
+            Commands.waitSeconds(0.75),  // let the stow moves finish before testing
             m_shooter.selfTestCommand(),
             m_lintake.selfTestCommand(),
             m_drivetrain.selfTestCommand(),
             Commands.runOnce(this::summarizeMotorTest)
-        );
-        return Commands.either(
-            sequence,
-            Commands.runOnce(() -> SmartDashboard.putString(
-                "SystemsCheck/MotorTest/Result", "SKIPPED - enable the robot (Teleop or Test) first")),
-            DriverStation::isEnabled
         ).withName("MotorTest");
+
+        return Commands.runOnce(() -> {
+            if (DriverStation.isEnabled()) {
+                // schedule() on an already-running command is a no-op, so double-clicking
+                // the button can't restart the test mid-run.
+                CommandScheduler.getInstance().schedule(sequence);
+            } else {
+                SmartDashboard.putString("SystemsCheck/MotorTest/Result",
+                    "SKIPPED - enable the robot (Teleop or Test) first");
+            }
+        }).ignoringDisable(true).withName("MotorTestButton");
     }
 
     private void summarizeMotorTest() {

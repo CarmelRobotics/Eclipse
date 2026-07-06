@@ -14,8 +14,6 @@ import java.util.function.BooleanSupplier;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -171,8 +169,14 @@ public class RobotContainer {
     // is held, the aim command owns the drivetrain (so you can pop out of the trench and
     // immediately shoot or ferry).
     Trigger aimHeld = m_controller.rightTrigger().or(m_controller.a()).or(m_controller.povUp());
+    // X (the X-lock brake) is folded into the trigger rather than left to interrupt the
+    // assist command: whileTrue only re-schedules on a fresh rising edge, so a brake tap
+    // that merely INTERRUPTED the assist would kill it until the driver left and re-entered
+    // the zone. With X in the trigger, releasing the brake IS a rising edge and the assist
+    // resumes immediately.
     Trigger assistActive = new Trigger(() -> currentAssistZone() != AssistZone.NONE)
-        .and(aimHeld.negate());
+        .and(aimHeld.negate())
+        .and(m_controller.x().negate());
 
     assistActive.whileTrue(m_drivetrain.applyRequest(this::assistDriveRequest));
     assistActive.onFalse(Commands.runOnce(() -> m_assistLockHeading = null));
@@ -225,7 +229,8 @@ public class RobotContainer {
                 heldPassCommand(),
                 rumbleWhenReady(m_shooter::readyToPass)
             ),
-            () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters && isInAllianceZone()
+            () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
+                && m_drivetrain.isInAllianceZone()
         )
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
@@ -289,29 +294,6 @@ public class RobotContainer {
     // blocks or a clear runway. Deliberate button only, never auto-run, and it no-ops unless
     // the robot is enabled. Per-motor PASS/FAIL lands under SystemsCheck/*.
     SmartDashboard.putData("SystemsCheck/RunMotorTest", m_systemsCheck.motorTestCommand());
-  }
-
-  // True when the robot is legally inside its own alliance zone. This gates hub shots on
-  // POSITION, not just distance: without it a robot could stand past the barrier and still
-  // be within 5 m of its hub.
-  //
-  // Which zone is "ours" comes from the driver-station alliance, NOT from which hub is
-  // nearest. DriverStation.getAlliance() returns the FMS-assigned alliance in a real match
-  // and the manually selected one in the shop, so this is alliance-driven in both cases --
-  // set the DS alliance to match the side you're practicing on.
-  //
-  // The hub sits ON the alliance-zone line (it's part of the barrier structure), so the
-  // zone is everything between your wall and the hub's X -- the robot must be on the wall
-  // side of it. Blue's hub (x=4.625) is near the x=0 wall, so its zone is robotX <= hubX;
-  // red's hub (x=11.925) is near the far wall, so its zone is robotX >= hubX. The pose is in
-  // absolute blue-origin coordinates and does NOT flip by alliance, which is why we pick the
-  // hub X explicitly per alliance here.
-  private boolean isInAllianceZone() {
-    boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
-    double robotX = m_drivetrain.getState().Pose.getX();
-    double hubX = (red ? ShooterConstants.kRedHubPosition
-                       : ShooterConstants.kBlueHubPosition).getX();
-    return red ? robotX >= hubX : robotX <= hubX;
   }
 
   // Classify the robot's position against the assist zones. INSIDE beats NEAR when
