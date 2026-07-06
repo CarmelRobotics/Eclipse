@@ -1,0 +1,68 @@
+{
+  "version": "2025.0",
+  "waypoints": [
+    {
+      "anchor": {
+        "x": 5.95,
+        "y": 5.6
+      },
+      "prevControl": null,
+      "nextControl": {
+        "x": 5.0,
+        "y": 5.3
+      },
+      "isLocked": false,
+      "linkedName": "BLUE_LEFT_CYCLE2_NEAR_MID_FIELD"
+    },
+    {
+      "anchor": {
+        "x": 0.647,
+        "y": 4.866
+      },
+      "prevControl": {
+        "x": 1.5,
+        "y": 5.1
+      },
+      "nextControl": null,
+      "isLocked": false,
+      "linkedName": "BLUE_LEFT_SCORE"
+    }
+  ],
+  "rotationTargets": [],
+  "constraintZones": [
+    {
+      "name": "slow to score",
+      "minWaypointRelativePos": 0.6,
+      "maxWaypointRelativePos": 1.0,
+      "constraints": {
+        "maxVelocity": 1.5,
+        "maxAcceleration": 2.5,
+        "maxAngularVelocity": 540.0,
+        "maxAngularAcceleration": 720.0,
+        "nominalVoltage": 12.0,
+        "unlimited": false
+      }
+    }
+  ],
+  "pointTowardsZones": [],
+  "eventMarkers": [],
+  "globalConstraints": {
+    "maxVelocity": 4.96,
+    "maxAcceleration": 3.5,
+    "maxAngularVelocity": 540.0,
+    "maxAngularAcceleration": 720.0,
+    "nominalVoltage": 12.0,
+    "unlimited": false
+  },
+  "goalEndState": {
+    "velocity": 0,
+    "rotation": -61.978
+  },
+  "reversed": false,
+  "folder": null,
+  "idealStartingState": {
+    "velocity": 2.0,
+    "rotation": 180.0
+  },
+  "useDefaultConstraints": false
+}

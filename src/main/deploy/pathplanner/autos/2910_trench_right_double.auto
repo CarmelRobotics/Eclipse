@@ -1,0 +1,111 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "named",
+          "data": {
+            "name": "intake deploy"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake run"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_PASS_PRELOAD_STARTING_TO_RIGHT_PASS_FAR_MID_FIELD"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_PASS_FAR_MID_FIELD_TO_RIGHT_PASS_NEAR_MID_FIELD"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_PASS_NEAR_MID_FIELD_TO_RIGHT_TRENCH_RETURN"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_TRENCH_RETURN_TO_RIGHT_SCORE"
+          }
+        },
+        {
+          "type": "race",
+          "data": {
+            "commands": [
+              {
+                "type": "named",
+                "data": {
+                  "name": "dump"
+                }
+              },
+              {
+                "type": "wait",
+                "data": {
+                  "waitTime": 4.0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_CYCLE2_SCORE_TO_CYCLE2_FAR_MID_FIELD"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_CYCLE2_FAR_MID_FIELD_TO_CYCLE2_NEAR_MID_FIELD"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "BLUE_RIGHT_CYCLE2_NEAR_MID_FIELD_TO_CYCLE2_SCORE"
+          }
+        },
+        {
+          "type": "race",
+          "data": {
+            "commands": [
+              {
+                "type": "named",
+                "data": {
+                  "name": "dump"
+                }
+              },
+              {
+                "type": "wait",
+                "data": {
+                  "waitTime": 4.0
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}
