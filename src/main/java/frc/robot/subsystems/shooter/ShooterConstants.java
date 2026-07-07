@@ -68,11 +68,11 @@ public final class ShooterConstants {
     // can't decouple backspin from exit speed (single contact surface, no opposing
     // wheels), but a flatter, faster arrival keeps the ball's forward speed above its
     // spin bite on landing, so ferried balls roll out instead of checking up and
-    // bouncing back out of the corner. 0.086 matches the flattest SCORE table entry,
-    // which fed fine on the field despite sitting past the nominal 25 deg feed limit.
-    // Tune live (higher = flatter; watch feed reliability) and expect pass RPS to come
-    // UP as this flattens (less arc = less carry at the same speed) -- trim with
-    // ShotTuning/PassRpsOffset, then bake both here.
+    // bouncing back out of the corner. 0.086 matches the flattest SCORE table entry
+    // and is confirmed to feed fine (the 25 deg "feed limit" is only nominal). Tune
+    // live (higher = flatter) and expect pass RPS to come UP as this flattens (less
+    // arc = less carry at the same speed) -- trim with ShotTuning/PassRpsOffset, then
+    // bake both here.
     public static final double kPassPivotPosition = 0.086;
     // SHOT_BLOCK: raise the shooter to block incoming shots. 0.5 rot (~180 deg) is real,
     // reachable travel -- the pivot's range extends far past the 25 deg feed limit

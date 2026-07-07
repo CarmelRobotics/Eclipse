@@ -115,14 +115,12 @@ get filled in.
 
 - [ ] From past the zone line, hold RT (auto-PASS) or POV-up (forced): robot faces
       the correct corner (`pass/target x/y` sane, side flips with field half)
-- [ ] **Feed check first:** passes now launch FLATTER than before
-      (`ShotTuning/PassPivotRot` = 0.086, past the nominal 25° kicker feed limit but
-      field-proven at that value for hub shots) — confirm balls still feed cleanly.
-      If feeding chokes, lower the number toward 0.069 (= old LOB angle)
-- [ ] Balls arrive flatter and should ROLL OUT instead of checking up and bouncing
-      back. Still bouncing back → flatter: raise `PassPivotRot` in +0.005 steps
-      (watch feed). Landing short → `ShotTuning/PassRpsOffset` up (flatter carry
-      needs more speed than the 25°-modeled table; expect to add a few RPS)
+- [ ] Passes launch flatter now (`ShotTuning/PassPivotRot` = 0.086, feeds fine) so
+      balls should ROLL OUT instead of checking up and bouncing back. Still bouncing
+      back → flatter: raise `PassPivotRot` in +0.005 steps. Landing short →
+      `ShotTuning/PassRpsOffset` up (flatter carry needs more speed than the
+      25°-modeled table; expect to add a few RPS). Rolling THROUGH the zone → too
+      flat: back off `PassPivotRot`
 - [ ] Bounce-out of the corner → also aim deeper: lower `ShotTuning/PassCornerInsetM`
       (1.0 now)
 - [ ] Write down final `PassPivotRot` + `PassRpsOffset` to bake in
