@@ -104,7 +104,7 @@ Flywheel gains: kP 0.3, kS 0.15, kV 0.125, kA 0.2, with supply/stator current li
 ### 4.2 State machines
 
 - `ShooterState`: `ZERO` (smart idle — see below), `SCORE` (table RPS), `PASS` (distance-interpolated ferry), `LOB` (40), `SEND` (90), `REVERSE` (−10, jam clearance)
-- `PivotState`: `STOW` (0), `SCORE` (table angle), `LOB` (25° = 0.0694 rot — max kicker-feedable travel), `SHOT_BLOCK` (tunable, default 0.5 rot)
+- `PivotState`: `STOW` (0), `SCORE` (table angle), `LOB` (25° = 0.0694 rot — nominal kicker feed limit), `PASS` (tunable, default 0.086 — flatter ferry for backspin mitigation), `SHOT_BLOCK` (tunable, default 0.5 rot)
 - `IndexerState`: `ZERO` (0 V), `SCORE` (−4.5 V), `REVERSE` (+4.5 V)
 
 **Smart idle:** `ZERO` pre-spins the drum at 6.7 RPS for fast spin-up, but only within 6.5 m of the hub (beyond that it's wasted draw) and only while battery > 7.0 V — under load the nice-to-have pre-spin is shed to protect the drivetrain.
@@ -123,7 +123,7 @@ Three `InterpolatingDoubleTreeMap`s map **motion-compensated distance → pivot 
 
 The pivot curve is floored by kicker clearance (at dead stow the shooter rests on the kicker wheels) and effectively saturates near the LOB angle at range. Long range (≥ 3.5 m) leans on RPS, which the drag signature demands scale progressively, not by a flat offset. Live trims: `ShotTuning/PivotOffset`, `ShooterRpsOffset`, `TimeOfFlightOffset`.
 
-**Pass tables:** ferry distance (3–13 m) → 28–61 RPS at the LOB angle, aimed at the alliance-zone corner on the robot's current side (0.5 m centerline hysteresis so the target can't flicker). The aim point sits `ShotTuning/PassCornerInsetM` (1.0 m) in from the walls — heavy backspin makes balls check up and bounce *back* on landing, so aiming deep settles them in the zone.
+**Pass tables:** ferry distance (3–13 m) → 28–61 RPS, aimed at the alliance-zone corner on the robot's current side (0.5 m centerline hysteresis so the target can't flicker). Backspin is not code-controllable (single drum surface, no opposing wheels — spin and exit speed scale together), so its landing effect is managed two ways: passes launch at a **deliberately flatter angle** than LOB (`ShotTuning/PassPivotRot`, default 0.086 rot — flatter arrival keeps forward speed above the spin bite so balls roll out instead of checking up and bouncing back), and the aim point sits `ShotTuning/PassCornerInsetM` (1.0 m) in from the walls so any residual bounce-back settles in the zone. The RPS table was modeled at 25°; expect `PassRpsOffset` to trim up at the flatter angle.
 
 ### 4.4 Shot lifecycle
 

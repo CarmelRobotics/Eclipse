@@ -64,6 +64,16 @@ public final class ShooterConstants {
     // farther (SHOT_BLOCK commands 0.5 rot). SCORE table entries may sit above this;
     // they fed fine on the field.
     public static final double kLobPivotPosition = 25.0 / 360.0;  // ~0.0694 output rotations
+    // PASS pivot: deliberately FLATTER than LOB (higher rot = flatter launch). The drum
+    // can't decouple backspin from exit speed (single contact surface, no opposing
+    // wheels), but a flatter, faster arrival keeps the ball's forward speed above its
+    // spin bite on landing, so ferried balls roll out instead of checking up and
+    // bouncing back out of the corner. 0.086 matches the flattest SCORE table entry,
+    // which fed fine on the field despite sitting past the nominal 25 deg feed limit.
+    // Tune live (higher = flatter; watch feed reliability) and expect pass RPS to come
+    // UP as this flattens (less arc = less carry at the same speed) -- trim with
+    // ShotTuning/PassRpsOffset, then bake both here.
+    public static final double kPassPivotPosition = 0.086;
     // SHOT_BLOCK: raise the shooter to block incoming shots. 0.5 rot (~180 deg) is real,
     // reachable travel -- the pivot's range extends far past the 25 deg feed limit
     // (confirmed on the robot; 25 deg is only where the kicker stops being able to feed).
@@ -73,6 +83,7 @@ public final class ShooterConstants {
     public static final double kPivotGearRatio = 42.0;   // motor rotations per output rotation
 
     // ===== Live tuning keys (dashboard) =====
+    public static final String kPassPivotPositionKey = "ShotTuning/PassPivotRot";
     public static final String kShotBlockPivotPositionKey = "ShotTuning/ShotBlockPivotPosition";
     public static final String kPivotCurrentLimitKey = "ShotTuning/PivotCurrentLimitA";
     public static final String kPivotCurrentTimeoutKey = "ShotTuning/PivotCurrentTimeoutS";
@@ -382,6 +393,7 @@ public final class ShooterConstants {
         STOW,
         SCORE,
         LOB,
+        PASS,     // flatter-than-LOB ferry angle (tunable) to tame backspin bounce-back
         SHOT_BLOCK;
     }
 

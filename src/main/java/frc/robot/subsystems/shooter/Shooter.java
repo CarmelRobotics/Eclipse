@@ -88,6 +88,9 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_pivotOffset = new LoggedTunableNumber(ShooterConstants.kPivotOffsetKey, 0);
     private final LoggedTunableNumber m_shooterRpsOffset = new LoggedTunableNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
     private final LoggedTunableNumber m_passRpsOffset = new LoggedTunableNumber(ShooterConstants.kPassRpsOffsetKey, 0);
+    // Pass launch angle (output rot; higher = flatter). Flatter than LOB on purpose to
+    // tame backspin bounce-back on ferry landings -- see kPassPivotPosition.
+    private final LoggedTunableNumber m_passPivotPosition = new LoggedTunableNumber(ShooterConstants.kPassPivotPositionKey, ShooterConstants.kPassPivotPosition);
     private final LoggedTunableNumber m_shotBlockPivotPosition = new LoggedTunableNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
     private final LoggedTunableNumber m_pivotCurrentLimit = new LoggedTunableNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
     private final LoggedTunableNumber m_pivotCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
@@ -403,14 +406,14 @@ public class Shooter extends SubsystemBase {
     }
 
     // Pass readiness: unlike readyToShoot(), this gates on the PASS targets -- flywheel
-    // at the distance-interpolated ferry speed, pivot at the LOB (max feed) angle, and
-    // heading within the wider pass tolerance of the landing-corner bearing. This is
-    // what lets passes fire on actual spin-up instead of a blind timeout.
+    // at the distance-interpolated ferry speed, pivot at the (tunable, flatter-than-LOB)
+    // pass angle, and heading within the wider pass tolerance of the landing-corner
+    // bearing. This is what lets passes fire on actual spin-up instead of a blind timeout.
     public boolean readyToPass() {
         boolean spunUp = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetPassRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
         double currentPivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
-        boolean pivotReady = Math.abs(currentPivotOutputRot - ShooterConstants.kLobPivotPosition)
+        boolean pivotReady = Math.abs(currentPivotOutputRot - m_passPivotPosition.get())
             <= ShooterConstants.kPivotReadyToleranceRotations;
         boolean aimed = Math.abs(m_drive.getPassHeadingError().getDegrees())
             <= ShooterConstants.kPassHeadingToleranceDegrees;
@@ -471,6 +474,7 @@ public class Shooter extends SubsystemBase {
             case STOW -> setPivotPosition(ShooterConstants.kStowPivotPosition);
             case SCORE -> setPivotPosition(m_targetPivotPosition);
             case LOB -> setPivotPosition(ShooterConstants.kLobPivotPosition);
+            case PASS -> setPivotPosition(m_passPivotPosition.get());
             case SHOT_BLOCK -> setPivotPosition(m_shotBlockPivotPosition.get());
         }
 

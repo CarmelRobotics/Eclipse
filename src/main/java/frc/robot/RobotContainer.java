@@ -456,13 +456,14 @@ public class RobotContainer {
 
   // === Held pass (teleop) ===
   // Same shape as heldShotCommand, but gated on readyToPass() -- flywheel at the
-  // distance-interpolated ferry speed, pivot at max feed, aimed at the pass corner --
-  // so passes fire on actual spin-up. Longer timeout backstop: ferry speeds are higher,
-  // so spin-up takes longer than a hub shot's.
+  // distance-interpolated ferry speed, pivot at the flatter-than-LOB pass angle
+  // (backspin bounce-back mitigation; see ShooterConstants.kPassPivotPosition), aimed
+  // at the pass corner -- so passes fire on actual spin-up. Longer timeout backstop:
+  // ferry speeds are higher, so spin-up takes longer than a hub shot's.
   private Command heldPassCommand() {
     return Commands.deadline(
         Commands.sequence(
-            prepareShotCommand(PivotState.LOB, ShooterState.PASS),
+            prepareShotCommand(PivotState.PASS, ShooterState.PASS),
             Commands.waitUntil(m_shooter::readyToPass).withTimeout(ShooterConstants.kPassSpinupTimeoutSeconds),
             Commands.run(this::feed, m_shooter)
         ),
