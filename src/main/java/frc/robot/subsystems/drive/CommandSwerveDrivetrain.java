@@ -40,6 +40,7 @@ import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
 import frc.robot.Constants;
+import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
 import frc.robot.subsystems.localisation.LimelightHelpers;
 import frc.robot.subsystems.localisation.LimelightInfo;
@@ -301,6 +302,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return run(() -> this.setControl(request.get()));
     }
 
+    // Runtime supply-current reallocation for the PowerManager. Re-applies a supply-only
+    // current limit to all four drive motors (matching TunerConstants, which sets supply
+    // only on the drive side -- traction is bounded separately by the 120 A slip current).
+    // Config applies block for ~a millisecond each, so the PowerManager calls this from a
+    // background thread; the short timeout keeps a missing device from hanging that thread.
+    public void applyDriveSupplyCurrentLimit(double amps) {
+        var limits = new com.ctre.phoenix6.configs.CurrentLimitsConfigs()
+            .withSupplyCurrentLimit(amps)
+            .withSupplyCurrentLimitEnable(true);
+        for (int i = 0; i < 4; i++) {
+            getModule(i).getDriveMotor().getConfigurator().apply(limits, 0.05);
+        }
+    }
+
     /**
      * Runs the SysId Quasistatic test in the given direction for the routine
      * specified by {@link #m_sysIdRoutineToApply}.
@@ -396,7 +411,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             double visionDelta = estimate.pose.getTranslation()
                 .getDistance(getState().Pose.getTranslation());
 
-            if (visionDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
+            // FeatureFlags.VisionFusion off -> read + publish diagnostics but never touch the
+            // pose (pure wheel odometry). The field escape hatch if the camera goes bad.
+            if (!FeatureFlags.VISION_FUSION.getAsBoolean()) {
+                // fall through to the diagnostics below without correcting
+            } else if (visionDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
                 // Grossly off: snap to vision XY, keep the gyro's heading (vision heading
                 // jitters a few degrees; the Pigeon is far more stable).
                 resetPose(new Pose2d(
@@ -701,6 +720,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             m_shotVelFilterX.calculate(speeds.vxMetersPerSecond),
             m_shotVelFilterY.calculate(speeds.vyMetersPerSecond)
         ).times(m_moveCompGain.get());
+        // FeatureFlags.ShootOnTheMove off -> zero the lead (aim as if stationary). The
+        // filters still run above so they stay warm if it's toggled back on mid-match.
+        if (!FeatureFlags.SHOOT_ON_THE_MOVE.getAsBoolean()) {
+            lead = new Translation2d();
+        }
 
         // Fixed-point iteration: lead depends on TOF, TOF depends on the led distance.
         // Converges in 2-3 passes at any legal robot speed.

@@ -143,7 +143,22 @@ The robot's power story is "four drive Krakens plus four flywheel Krakens plus e
 - **Open-loop voltage ramp, 0.15 s.** Teleop drive is `OpenLoopVoltage`, so a full stick slam is otherwise a 0→12 V step and the single biggest di/dt spike in normal driving. Ramping flattens the spike with no steady-state cost; auto path following is closed-loop velocity and untouched.
 - **Steer limits: 60 A stator, 20 A supply.** Azimuth needs torque headroom but never sustained battery draw.
 
-The other layers, described in their own sections: RIO brownout threshold lowered to 6.0 V (`Robot`), flywheel supply caps (35 A × 4), flywheel idle shedding below 7.0 V, and mechanism supply caps (30 A).
+The other layers, described in their own sections: RIO brownout threshold lowered to 6.0 V (`Robot`), flywheel supply caps (35 A × 4), flywheel idle shedding below 7.0 V, mechanism supply caps (30 A), and — on top of all of them — the dynamic **PowerManager** (§4.5) that reallocates the drive/flywheel budget by activity instead of budgeting worst-case-everywhere.
+
+### 4.5 Dynamic power management (PowerManager)
+
+The static caps above must each assume the worst case — the drive limit assumes a full launch, the flywheel limit assumes a full volley — even though those never happen at the same instant. `PowerManager` (in `subsystems/power`, modeled on team 581's) exploits that: it switches between named `PowerMode`s that hand the battery to whatever the robot is doing right now.
+
+| Mode | Drive A/motor | Flywheel A/motor | When |
+|---|---|---|---|
+| IDLE | 40 | 35 | Default — equals the static compiled limits |
+| SCORING | 25 | 50 | Aiming/shooting: flywheel headroom to hold speed, drive (holding a heading) yields |
+| SPRINT | 65 | 20 | Full-stick translation, no aim: drive pulls hard, flywheel only idling |
+| AUTO | 55 | 45 | Autonomous collect-and-score cycles |
+
+The desired mode is computed each loop in `RobotContainer.desiredPowerMode()` from controller and DS state; `PowerManager` (a self-scheduling `SubsystemBase`) applies the mode's supply limits **only on change**, and only after the mode has held ~100 ms (a stability filter so a stick hovering at the SPRINT threshold can't churn config writes). Because applying a current-limit config over CAN blocks ~1 ms per motor, the eight applies run on a **single background executor thread** rather than stalling the 20 ms loop. Each subsystem exposes the runtime setter (`applyDriveSupplyCurrentLimit`, `applyFlywheelSupplyCurrentLimit`) that preserves its other config (the drive stays supply-only; the flywheel keeps its 100 A stator headroom).
+
+The whole system is gated by `FeatureFlags.POWER_MANAGER`, **default off**: when off the mode is pinned to IDLE, whose limits equal the compiled static defaults, so disabling the flag restores exactly the known-good static behavior. It is opt-in at the field precisely because it changes brownout behavior and must be validated against the battery traces before it is trusted in a match.
 
 ### 4.3 Swerve requests in use
 
@@ -602,6 +617,10 @@ A ~60-line utility modeled on the 6328/1678/2910 pattern, backed by SmartDashboa
 
 **Tuning mode is a single global switch** — `LoggedTunableNumber.setTuningMode(...)` in the `Robot` constructor, currently `true`. The competition checklist item: set it `false` before an event, freezing every knob at its compiled default so a stray dashboard edit can't change gains mid-match. The complete knob catalog is Appendix C.
 
+### 13.4 Feature flags
+
+`FeatureFlags` (in `config`, boolean analog of the tunable numbers, backed by `FeatureFlag`) exposes dashboard toggles under `FeatureFlags/*` for disabling a behavior live without a redeploy — the field escape hatches when something misbehaves mid-session: `VisionFusion` (off → pure odometry), `ShootOnTheMove` (off → aim as if stationary), `ShiftsGate` and `AllianceZoneGate` (off → force a hub-shot offer regardless of SHIFTS state or field position), `IdleSpin`, `DriverAssists`, and `PowerManager`. Unlike tunable numbers these are **always live** (not gated by tuning mode) — intervening during a match is the entire point — and every flag defaults to the normal robot, so an untouched flag changes nothing. Each is wired at the single point where its behavior branches (the vision loop, the shot solver's lead term, the right-trigger condition, the idle-spin computation, the assist trigger, the power manager).
+
 ### 13.3 The field workflow
 
 The intended loop, encoded in `FIELD_TESTING.md`: pit health checks (fault monitor → static check → motor test on blocks) → pose/vision sanity (Field2d vs. tape measure — *fix pose before tuning anything*) → aim and zone-gate sanity → the shot-table sweep at 1.5/2.5/3.5/4.5/5.0 m using the `last shot` string and dashboard trims → pass tuning (flatter-pivot iteration) → assist/utility checks → autos in escalating order → failure drills (cover the camera, pull the controller, run a dying battery) → **bake every surviving trim into `ShooterConstants`, zero the dashboard offsets, lock tuning mode.**
@@ -745,3 +764,26 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 | 53 | Indexer (Kraken X44) | rio |
 | 35 / 2 | Pinion leader / follower | rio |
 | 45 | Intake roller | rio |
+
+## Appendix E: Feature Flags and Power Modes
+
+**Feature flags** (`FeatureFlags/*`, always live, all default ON except PowerManager):
+
+| Flag | Off behavior |
+|---|---|
+| `VisionFusion` | Pose runs on wheel odometry only |
+| `ShootOnTheMove` | Aim as if stationary (no velocity lead) |
+| `ShiftsGate` | Right trigger offers HUB regardless of SHIFTS state |
+| `AllianceZoneGate` | Right trigger offers HUB regardless of field position |
+| `IdleSpin` | Flywheel only spins on a shot command |
+| `DriverAssists` | Fully manual driving everywhere |
+| `PowerManager` (default **OFF**) | Static compiled current limits (IDLE mode) |
+
+**Power modes** (supply amps per motor, applied by `PowerManager` on the desired-mode change):
+
+| Mode | Drive | Flywheel | Trigger |
+|---|---|---|---|
+| IDLE | 40 | 35 | Default / feature off (= static compiled limits) |
+| SCORING | 25 | 50 | RT / A / POV-up held |
+| SPRINT | 65 | 20 | Left-stick magnitude > 0.9, not aiming |
+| AUTO | 55 | 45 | Autonomous enabled |

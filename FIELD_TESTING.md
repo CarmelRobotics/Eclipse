@@ -154,6 +154,27 @@ error = wasted first seconds):
 - [ ] Note actual score poses vs. the shortened paths (today's path edits moved the
       score waypoint to (2.72, 5.50)) — confirm dump from there actually scores
 
+## 8.5 Feature flags & power manager (dashboard)
+
+Under `FeatureFlags/*` — flip any OFF to disable a behavior live, no redeploy. Your field
+escape hatches:
+- [ ] Confirm all default ON except `PowerManager` (default OFF). Toggling should visibly
+      change behavior (e.g. `VisionFusion` off → `vision/pose resets` stops climbing and
+      pose rides odometry; `ShootOnTheMove` off → aim stops leading while strafing)
+- [ ] `VisionFusion` — off if the camera feeds garbage; robot runs on odometry
+- [ ] `ShiftsGate` / `AllianceZoneGate` — off to force HUB mode anywhere (bad game data, or
+      bench-shooting from outside the zone)
+
+**PowerManager** (dynamic drive-vs-flywheel current budgeting) starts OFF because it
+re-allocates current limits at runtime and hasn't met the field. To validate:
+- [ ] Baseline first with it OFF (static limits — the known-good config)
+- [ ] Flip `FeatureFlags/PowerManager` ON. Watch `PowerManager/Applied` change with activity:
+      IDLE parked → SCORING while aiming → SPRINT on full-stick drive → AUTO in auto
+- [ ] Full-power shot-while-driving: does the battery hold better than baseline? Watch
+      `Battery/Voltage` / `Battery/BrownedOut`. If a pushing match feels weaker, that's
+      SCORING/IDLE capping drive to 25/40 A — expected; the budgets live in `PowerMode`
+- [ ] If anything feels off, flip it back OFF → instantly restores static limits (IDLE)
+
 ## 9. Failure drills (5 minutes, worth it)
 
 - [ ] Cover Limelight mid-driving → drive + aim still usable on odometry for ~10 s

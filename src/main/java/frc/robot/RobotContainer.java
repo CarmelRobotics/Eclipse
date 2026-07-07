@@ -14,6 +14,7 @@ import java.util.function.BooleanSupplier;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -23,9 +24,12 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.diagnostics.SystemsCheck;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.drive.TunerConstants;
+import frc.robot.subsystems.power.PowerManager;
+import frc.robot.subsystems.power.PowerMode;
 import frc.robot.subsystems.lintake.Lintake;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
@@ -41,6 +45,10 @@ public class RobotContainer {
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(m_drivetrain);
   private final SystemsCheck m_systemsCheck = new SystemsCheck(m_drivetrain, m_shooter, m_lintake);
+  // Dynamic current budgeting (drive vs. flywheel). Self-scheduling SubsystemBase; reads the
+  // desired mode each loop and re-applies limits on change. Gated by FeatureFlags.POWER_MANAGER.
+  private final PowerManager m_powerManager =
+      new PowerManager(m_drivetrain, m_shooter, this::desiredPowerMode);
   private final CommandXboxController m_controller = new CommandXboxController(0);
 
   private final SwerveRequest.FieldCentric driveRequest = new SwerveRequest.FieldCentric()
@@ -176,7 +184,8 @@ public class RobotContainer {
     // resumes immediately.
     Trigger assistActive = new Trigger(() -> currentAssistZone() != AssistZone.NONE)
         .and(aimHeld.negate())
-        .and(m_controller.x().negate());
+        .and(m_controller.x().negate())
+        .and(FeatureFlags.DRIVER_ASSISTS);  // field kill switch for the assists
 
     assistActive.whileTrue(m_drivetrain.applyRequest(this::assistDriveRequest));
     assistActive.onFalse(Commands.runOnce(() -> m_assistLockHeading = null));
@@ -235,8 +244,8 @@ public class RobotContainer {
             // instead of wasting balls on a dead hub. Latches at the pull like everything
             // else -- a shift flip mid-hold doesn't yank the mode out from under the driver.
             () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
-                && m_drivetrain.isInAllianceZone()
-                && m_drivetrain.isOurHubActive()
+                && (m_drivetrain.isInAllianceZone() || !FeatureFlags.ALLIANCE_ZONE_GATE.getAsBoolean())
+                && (m_drivetrain.isOurHubActive() || !FeatureFlags.SHIFTS_GATE.getAsBoolean())
         )
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
@@ -527,6 +536,28 @@ public class RobotContainer {
 
   private double driverRotationalRate() {
     return -m_controller.getRightX() * Constants.kMaxAngularRate;
+  }
+
+  // Which power budget the robot wants right now, for the PowerManager. Aiming/shooting ->
+  // flywheel priority (SCORING); hard translation with no aim -> drive priority (SPRINT);
+  // autonomous -> both healthy (AUTO); otherwise the static-default IDLE budget. The
+  // PowerManager stability-filters this, so brief stick excursions past the sprint threshold
+  // don't churn current-limit configs.
+  private PowerMode desiredPowerMode() {
+    if (DriverStation.isAutonomousEnabled()) {
+      return PowerMode.AUTO;
+    }
+    boolean aiming = m_controller.rightTrigger().getAsBoolean()
+        || m_controller.a().getAsBoolean()
+        || m_controller.povUp().getAsBoolean();
+    if (aiming) {
+      return PowerMode.SCORING;
+    }
+    double stickMagnitude = Math.hypot(m_controller.getLeftX(), m_controller.getLeftY());
+    if (stickMagnitude > 0.9) {
+      return PowerMode.SPRINT;
+    }
+    return PowerMode.IDLE;
   }
 
   public Command getAutonomousCommand() {

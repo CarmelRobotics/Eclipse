@@ -17,6 +17,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.util.LoggedTunableNumber;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
@@ -367,6 +368,9 @@ public class Shooter extends SubsystemBase {
     // purpose -- the drum barely changes speed in the fraction of a second before the
     // bus recovers, so latching would be over-engineering.
     private double idleSpinRps() {
+        if (!FeatureFlags.IDLE_SPIN.getAsBoolean()) {
+            return 0.0;  // feature disabled: drum only spins on an actual shot command
+        }
         boolean nearHub = m_drive.getDistanceToClosestHub() <= ShooterConstants.kIdleSpinMaxDistanceMeters;
         boolean batteryHealthy = RobotController.getBatteryVoltage() > ShooterConstants.kIdleShedVoltage;
         return (nearHub && batteryHealthy) ? ShooterConstants.kIdleShooterRps : 0.0;
@@ -680,6 +684,22 @@ public class Shooter extends SubsystemBase {
         m_backLeftFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(velocityRps));
         m_backRightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(velocityRps));
         m_rightFollowerShooterMotor.setControl(m_velocityRequest.withVelocity(velocityRps));
+    }
+
+    // Runtime supply-current reallocation for the PowerManager. Re-applies to all four
+    // flywheel motors, keeping the generous 100 A stator cap (matches ShooterConstants) so
+    // only the battery-draw ceiling moves, never the recovery-torque headroom during a
+    // volley. Called from the PowerManager's background thread (config applies block).
+    public void applyFlywheelSupplyCurrentLimit(double amps) {
+        var limits = new com.ctre.phoenix6.configs.CurrentLimitsConfigs()
+            .withSupplyCurrentLimit(amps)
+            .withSupplyCurrentLimitEnable(true)
+            .withStatorCurrentLimit(100)
+            .withStatorCurrentLimitEnable(true);
+        m_leftLeaderShooterMotor.getConfigurator().apply(limits, 0.05);
+        m_backLeftFollowerShooterMotor.getConfigurator().apply(limits, 0.05);
+        m_rightFollowerShooterMotor.getConfigurator().apply(limits, 0.05);
+        m_backRightFollowerShooterMotor.getConfigurator().apply(limits, 0.05);
     }
 
     private void stopShooterMotors() {
