@@ -54,6 +54,10 @@ write numbers down IN THIS DOC (or a photo of it) so tuning survives the drive h
       (occasional +1 after being carried/lost is fine — steady climbing means it's
       snapping every frame: check camera mount/config)
 - [ ] `vision/tag count` ≥ 1 when facing tags; `hub visible` true
+- [ ] **`vision/heading seeded` goes true** after you face a **two-tag** view — this is the
+      gyro getting field-aligned from vision. Aim trusts the gyro heading, so if this is
+      still false, aiming is running on an unseeded/possibly-wrong heading. It re-aligns
+      automatically if the gyro ever diverges >10° from a multi-tag read (bump recovery)
 - [ ] **Cover the Limelight** and drive ~5 s: pose keeps moving on odometry (slow
       drift OK, freeze/jump = problem). Uncover: pose corrects smoothly, no violent snap
 - [ ] Spin in place 2–3 turns, drive back to the measured spot: pose still ≈ truth

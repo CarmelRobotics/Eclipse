@@ -201,6 +201,8 @@ The branch threshold is `kMaxVisionCorrectionMeters` = 1.0 m:
 - **Delta ≤ 1.0 m — fuse.** Normal tracking. The estimate feeds `addVisionMeasurement` with translation standard deviation **σ = 0.05 + 0.02·d²** meters (d = average tag distance): 0.07 m at 1 m, 0.13 m at 2 m, 0.37 m at 4 m. Heading σ is `Double.MAX_VALUE` — vision never corrects rotation; the Pigeon owns it. Fusion (rather than the earlier per-frame hard reset with a deadband) does two jobs: it smooths single-tag botpose jitter so the aim target doesn't vibrate, and it absorbs the garbage frames cameras emit as a tag exits the field of view (edge distortion plus motion blur while rotating). One of those garbage frames once hard-reset the pose *wrong at the exact moment vision went blind* — precisely when odometry needed a good starting point to carry the aim.
 - **No tags — carry.** Wheel odometry propagates the pose at cm/s drift, so aiming keeps working through dropouts (a hard requirement discovered on the field: the tag leaves the camera's FOV during close-range aiming).
 
+**Heading field-alignment.** The Pigeon owns *fine* rotation (the fusion above is translation-only, infinite heading σ), but it must be *field-aligned* in the first place — otherwise every aim is off by the misalignment forever, with no other heading correction. So the loop seeds that alignment from **multi-tag** botpose heading (`tagCount ≥ 2`, which is unambiguous — a single tag's heading can flip): it adopts the vision heading once (`vision/heading seeded` → true), and re-adopts only if the gyro has since diverged by more than `kVisionHeadingSeedToleranceDegrees` (10°). Small disagreements are left to the Pigeon, so normal jitter/drift never re-aligns and the aim target doesn't chatter; a genuine divergence — an unseeded gyro, a bad auto seed, or a mid-match bump — snaps back on the next two-tag look. This closes the single-point-of-failure where a wrong gyro heading silently ruined every shot (§14, incident 8).
+
 Timestamps pass through `Utils.fpgaToCurrentTime()` for correct latency compensation in the underlying pose estimator.
 
 ### 5.3 The imperative-reset rule
@@ -666,6 +668,18 @@ Documented because the fixes only stay fixed if the mechanisms are remembered.
 *Cause:* paths re-drawn from screenshots of 2910's routes instead of using their published files.
 *Fix:* byte-for-byte import, twice-prompted.
 *Lesson:* when copying a proven artifact, copy it exactly first and modify second.
+
+**7. Full-speed spin on a Red DS (the interaction bug).**
+*Symptom:* the robot spins in place at full speed on driving into the tower zone — but only with the DS set to Red.
+*Cause:* `FieldCentricFacingAngle` rotates its target by the operator perspective (180° on Red, verified in the Phoenix 26.1.0 sources), but every heading target here is an absolute blue-origin bearing. On Red the target sat ~180° away; the assist's 60° re-snap hysteresis kept it permanently ahead of the robot → continuous spin. The same flip silently faced hub/pass aim 180° from the target on Red. Blue's perspective rotation is 0°, so the blue-side field session never saw it.
+*Fix:* the drivetrain caches the exact perspective rotation it hands Phoenix and exposes `fieldToOperatorBearing()`, which pre-rotates each target by the inverse; applied at all three facing-angle sites.
+*Lesson:* two individually-correct behaviors (perspective rotation, snap hysteresis) composed into a violent failure — and an alliance-only bug is invisible until you test the other alliance.
+
+**8. Aiming's silent single point of failure: gyro heading.**
+*Symptom:* none yet — found by audit. Aim depends entirely on the gyro being field-aligned, and vision (by deliberate design) only corrected translation, never heading.
+*Cause:* a wrong gyro heading (no seed in teleop-only practice, a mid-match bump, a bad auto seed) would offset every shot by that error with no self-correction — and the Red-DS coupling of alliance→zone→perspective raised the stakes.
+*Fix:* seed the gyro from **multi-tag** vision heading (unambiguous) once, and re-align only on >10° divergence, so the Pigeon still owns fine rotation but can no longer be silently wrong. `vision/heading seeded` surfaces the state.
+*Lesson:* "trust one sensor" is fine only if that sensor is guaranteed correct at least once; a design that never cross-checks a critical value is a latent failure even when it's a deliberate choice.
 
 ---
 
