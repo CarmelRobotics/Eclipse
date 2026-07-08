@@ -343,14 +343,35 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             m_lastAlliance = Optional.of(allianceColor);
 
             if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
-                setOperatorPerspectiveForward(
-                    allianceColor == Alliance.Red
-                        ? kRedAlliancePerspectiveRotation
-                        : kBlueAlliancePerspectiveRotation
-                );
+                m_operatorForwardDirection = allianceColor == Alliance.Red
+                    ? kRedAlliancePerspectiveRotation
+                    : kBlueAlliancePerspectiveRotation;
+                setOperatorPerspectiveForward(m_operatorForwardDirection);
                 m_hasAppliedOperatorPerspective = true;
             }
         });
+    }
+
+    // Mirror of the perspective handed to setOperatorPerspectiveForward -- kept so
+    // fieldToOperatorBearing compensates with the EXACT rotation the swerve requests apply.
+    private Rotation2d m_operatorForwardDirection = Rotation2d.kZero;
+
+    /**
+     * Converts an absolute blue-origin field bearing into the frame FieldCentricFacingAngle
+     * expects. The request's default ForwardPerspective (OperatorPerspective) rotates
+     * TargetDirection by the operator-forward direction -- 180 degrees when the DS alliance
+     * is Red (verified in the Phoenix 26.1.0 sources, SwerveRequest.FieldCentricFacingAngle
+     * .apply()). All of our aim targets (hub, pass corner, assist locks) are blue-origin
+     * bearings, so WITHOUT this compensation every heading-locked feature pointed 180 deg
+     * wrong on a Red DS: hub/pass aim faced away from the target, and the trench/tower
+     * assist spun continuously (its nearest-90 lock re-snaps 60 deg into any rotation, so
+     * the rotated target stayed ~180 deg ahead of the robot forever). Pre-rotating by the
+     * inverse here makes the request's own rotation land back on the true field bearing.
+     * Blue DS is a no-op; a 180 rotation is self-inverse, so the compensation cannot be
+     * applied in the "wrong direction".
+     */
+    public Rotation2d fieldToOperatorBearing(Rotation2d fieldBearing) {
+        return fieldBearing.rotateBy(m_operatorForwardDirection.unaryMinus());
     }
 
     @Override
@@ -797,7 +818,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
-            .withTargetDirection(getHubHeading())
+            .withTargetDirection(fieldToOperatorBearing(getHubHeading()))
         );
     }
 
@@ -842,7 +863,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
-            .withTargetDirection(getPassHeading())
+            .withTargetDirection(fieldToOperatorBearing(getPassHeading()))
         );
     }
 

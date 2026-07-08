@@ -63,12 +63,12 @@ public final class LintakeConstants {
     //     yields to less; lower to slide in on lighter contact.
     //   Supply 30 A: brownout budget, unchanged.
     private static final CurrentLimitsConfigs kPinionCurrentLimits = new CurrentLimitsConfigs()
-        .withStatorCurrentLimitEnable(true).withStatorCurrentLimit(15)
-        .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
+        .withStatorCurrentLimitEnable(false).withStatorCurrentLimit(35)
+        .withSupplyCurrentLimitEnable(false).withSupplyCurrentLimit(35);
 
     // Roller keeps just the brownout supply cap (no compliance role).
     private static final CurrentLimitsConfigs kRollerCurrentLimits = new CurrentLimitsConfigs()
-        .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(30);
+        .withSupplyCurrentLimitEnable(false).withSupplyCurrentLimit(30);
 
     public static final TalonFXConfiguration LeaderPinionConfig = new TalonFXConfiguration()
         .withSlot0(PinionConfigs.Slot0Configs)
@@ -85,9 +85,9 @@ public final class LintakeConstants {
         .withSlot0(RollerConfigs.Slot0Configs).withCurrentLimits(kRollerCurrentLimits);
 
     public enum PinionState {
-        STOW(-4),
-        AGITATE(-7.5),
-        GROUND(-9.75);
+        STOW(0),
+        AGITATE(-4.5),
+        GROUND(-9.65);
 
         public final double position;
 

@@ -197,11 +197,11 @@ public class RobotContainer {
       AssistZone zone = currentAssistZone();
       return zone == AssistZone.TRENCH_IN || zone == AssistZone.TOWER_IN;
     });
-    insideStructure.onTrue(Commands.runOnce(() -> {
-      m_shooter.setState(PivotState.STOW);
-      m_lintake.setPinionState(PinionState.GROUND);
-    }));
-    insideStructure.onFalse(Commands.runOnce(() -> m_lintake.setPinionState(PinionState.STOW)));
+    // insideStructure.onTrue(Commands.runOnce(() -> {
+    //   m_shooter.setState(PivotState.STOW);
+    //   m_lintake.setPinionState(PinionState.GROUND);
+    // }));
+    //insideStructure.onFalse(Commands.runOnce(() -> m_lintake.setPinionState(PinionState.STOW)));
 
     // --- Standard driver bindings (unchanged) ---
     m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
@@ -389,12 +389,16 @@ public class RobotContainer {
       }
     }
 
+    // fieldToOperatorBearing: FieldCentricFacingAngle rotates its target by the operator
+    // perspective (180 deg on a Red DS). The lock is a blue-origin field bearing, so it must
+    // be pre-rotated or the assist chases a target ~180 deg away and, because the lock
+    // re-snaps every 60 deg of rotation, spins in place at full speed forever.
     return assistSnapRequest
         .withVelocityX(vx)
         .withVelocityY(vy)
         .withDeadband(Constants.kMaxSpeed * 0.1)
         .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
-        .withTargetDirection(m_assistLockHeading);
+        .withTargetDirection(m_drivetrain.fieldToOperatorBearing(m_assistLockHeading));
   }
 
   // Buzz the controller while `ready` is true so the driver feels the exact window the
