@@ -143,6 +143,28 @@ get filled in.
 - [ ] Rumble: steady buzz exactly while `ready to shoot` is true, clears on release
 - [ ] If a shot ever hangs, read the `ready/*` booleans — the false one is the reason
 
+## 7.5 Lintake pinion tuning (optional, on blocks or intake clear)
+
+The pinion arms are MotionMagic position-controlled; gains are live under `LintakeTuning/*`
+(defaults = current compiled values, so nothing changes until you touch a knob). Tune against
+`LintakeTuning/PinionErrorRot` (target − actual, motor rot) — want it to reach ~0 fast, no
+overshoot, no ringing. **Key constraint:** the 15 A stator limit caps pinion torque (that's
+the compliance), so a too-aggressive profile just saturates the limit and the arm lags — fix
+that with the profile, not by cranking kP.
+
+- [ ] Feedforward first — set `PinionKp` and `PinionKd` to 0 temporarily
+- [ ] `PinionKs`: raise from 0 until the arm just barely creeps on the lightest command
+      (kS=0 today is physically wrong — every mechanism needs a static term; expect ~0.1–0.2)
+- [ ] `PinionKv`: adjust so error stays small *during* a move (arm tracks the profile).
+      Current 0.25 is ~2× a Kraken's textbook rotor kV (~0.12) — plausible under load but
+      unverified; SysId would ground it
+- [ ] Restore `PinionKp` (start 1.25), raise until it reaches target crisply; if it
+      overshoots/rings, add `PinionKd`
+- [ ] Profile: raise `PinionCruiseRps` / `PinionAccelRps2` for a faster deploy until the arm
+      can't keep up (error grows mid-move = hitting the current limit) or slams the stop; back off
+- [ ] Verify STOW ↔ GROUND ↔ AGITATE all land clean and hold
+- [ ] Bake winners into `LintakeConstants.PinionConfigs`, zero the dashboard knobs, done
+
 ## 8. Autonomous (clear the field of people)
 
 Run in this order; be ready to disable. Robot placed at the path's start pose

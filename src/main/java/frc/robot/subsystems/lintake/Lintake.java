@@ -1,5 +1,7 @@
 package frc.robot.subsystems.lintake;
 
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -11,6 +13,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
+import frc.robot.util.LoggedTunableNumber;
 
 public class Lintake extends SubsystemBase {
     private final TalonFX m_leaderPinionMotor = new TalonFX(LintakeConstants.kLeaderPinionMotorId);
@@ -21,6 +24,22 @@ public class Lintake extends SubsystemBase {
 
     private PinionState m_pinionState = PinionState.STOW;
     private RollerState m_rollerState = RollerState.ZERO;
+
+    // ===== Live pinion tuning =====
+    // Dashboard-editable copies of the compiled PinionConfigs gains + MotionMagic profile,
+    // re-applied to both pinion motors only when a value actually changes (like the flywheel
+    // gains). Defaults intentionally match LintakeConstants so behavior is unchanged until
+    // you touch a knob. Tune on the robot against LintakeTuning/PinionErrorRot (see the
+    // recommended procedure), then bake the winners back into LintakeConstants and set
+    // LoggedTunableNumber.setTuningMode(false) for competition.
+    private final LoggedTunableNumber m_pinionKp = new LoggedTunableNumber("LintakeTuning/PinionKp", 1.25);
+    private final LoggedTunableNumber m_pinionKd = new LoggedTunableNumber("LintakeTuning/PinionKd", 0.15);
+    private final LoggedTunableNumber m_pinionKs = new LoggedTunableNumber("LintakeTuning/PinionKs", 0.0);
+    private final LoggedTunableNumber m_pinionKv = new LoggedTunableNumber("LintakeTuning/PinionKv", 0.25);
+    private final LoggedTunableNumber m_pinionCruise =
+        new LoggedTunableNumber("LintakeTuning/PinionCruiseRps", 55);
+    private final LoggedTunableNumber m_pinionAccel =
+        new LoggedTunableNumber("LintakeTuning/PinionAccelRps2", 135);
 
     public Lintake() {
         m_followerPinionMotor.setPosition(0);
@@ -108,8 +127,35 @@ public class Lintake extends SubsystemBase {
         m_rollerState = rollerState;
     }
 
+    // Re-apply the pinion Slot0 gains + MotionMagic profile to both motors when any live knob
+    // changes. Single '|' (not '||') so every hasChanged() is polled -- each tracks its own
+    // changed-since-last-read state, and short-circuiting would skip updating some of them.
+    private void updatePinionGainsIfChanged() {
+        boolean changed = m_pinionKp.hasChanged() | m_pinionKd.hasChanged()
+            | m_pinionKs.hasChanged() | m_pinionKv.hasChanged()
+            | m_pinionCruise.hasChanged() | m_pinionAccel.hasChanged();
+        if (!changed) {
+            return;
+        }
+        // Apply Slot0 and MotionMagic separately; neither call disturbs the current limits or
+        // the leader/follower inverts (those live in other config groups).
+        var slot0 = new Slot0Configs()
+            .withKP(m_pinionKp.get()).withKD(m_pinionKd.get())
+            .withKS(m_pinionKs.get()).withKV(m_pinionKv.get()).withKA(0.01);
+        var mm = new MotionMagicConfigs()
+            .withMotionMagicCruiseVelocity(m_pinionCruise.get())
+            .withMotionMagicAcceleration(m_pinionAccel.get())
+            .withMotionMagicJerk(1600);
+        for (TalonFX motor : new TalonFX[] {m_leaderPinionMotor, m_followerPinionMotor}) {
+            motor.getConfigurator().apply(slot0);
+            motor.getConfigurator().apply(mm);
+        }
+    }
+
     @Override
     public void periodic() {
+        updatePinionGainsIfChanged();
+
         m_rollerMotor.setVoltage(m_rollerState.volts);
 
         // Compliance is handled by the pinion stator current limit (see
@@ -122,9 +168,12 @@ public class Lintake extends SubsystemBase {
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
         SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
         SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
-        SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, m_leaderPinionMotor.getPosition().getValueAsDouble());
+        double leaderPos = m_leaderPinionMotor.getPosition().getValueAsDouble();
+        SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, leaderPos);
         SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
-
+        // The signal you tune against: target minus actual (motor rotations). Watch this while
+        // editing the knobs -- want it to reach ~0 quickly with no overshoot and no ringing.
+        SmartDashboard.putNumber("LintakeTuning/PinionErrorRot", m_pinionState.position - leaderPos);
     }
     
 }
