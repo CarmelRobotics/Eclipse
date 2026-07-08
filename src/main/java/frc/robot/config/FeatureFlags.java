@@ -36,6 +36,11 @@ public final class FeatureFlags {
   /** Pre-spin the flywheel near the hub. Off = the drum only spins on a shot command. */
   public static final BooleanSupplier IDLE_SPIN = FeatureFlag.of("IdleSpin", true);
 
+  /** Indexer closed-loop velocity control (steady feed cadence under load). Off = legacy
+   *  open-loop voltage. Kept as a flag so shot consistency can be A/B'd directly at the field. */
+  public static final BooleanSupplier INDEXER_VELOCITY_CONTROL =
+      FeatureFlag.of("IndexerVelocityControl", true);
+
   /** Trench/tower driver assists. Off = fully manual driving everywhere. */
   public static final BooleanSupplier DRIVER_ASSISTS = FeatureFlag.of("DriverAssists", true);
 

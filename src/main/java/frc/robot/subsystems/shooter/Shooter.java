@@ -107,6 +107,20 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_flywheelKs = new LoggedTunableNumber("ShotTuning/FlywheelKs", 0.15);
     private final LoggedTunableNumber m_flywheelKv = new LoggedTunableNumber("ShotTuning/FlywheelKv", 0.125);
 
+    // ===== Indexer velocity tuning =====
+    // The indexer is velocity-controlled (behind FeatureFlags.INDEXER_VELOCITY_CONTROL) so its
+    // feed cadence stays constant whether it's pushing one ball or a stacked hopper. Under the
+    // old open-loop voltage, load sag varied how fast balls arrived at the flywheel, which
+    // varied the per-ball velocity dip and thus shot-to-shot exit speed. Feed RPS defaults to
+    // the old -4.5 V equivalent (4.5 / kV 0.12 = 37.5 rps); gains default to the compiled
+    // IndexerConfig Slot0. All live-tunable so you can A/B against voltage with the flag and
+    // dial the loop, then bake winners into ShooterConstants.
+    private final VelocityVoltage m_indexerVelocityRequest = new VelocityVoltage(0);
+    private final LoggedTunableNumber m_indexerFeedRps = new LoggedTunableNumber("ShotTuning/IndexerFeedRps", 37.5);
+    private final LoggedTunableNumber m_indexerKp = new LoggedTunableNumber("ShotTuning/IndexerKp", 0.11);
+    private final LoggedTunableNumber m_indexerKs = new LoggedTunableNumber("ShotTuning/IndexerKs", 0.1);
+    private final LoggedTunableNumber m_indexerKv = new LoggedTunableNumber("ShotTuning/IndexerKv", 0.12);
+
     // ===== Sensor-Free Shot Detection (no beam break needed) =====
     // PRINCIPLE: A ball passing through the drum dips the wheel velocity. Once the wheel
     // is spinning at target velocity, a dip (loss of >5 RPS) followed by recovery (back
@@ -530,8 +544,29 @@ public class Shooter extends SubsystemBase {
         DogLog.log("Shooter/ShotCount", m_shotCount);
         DogLog.log("Shooter/BallInFlywheel", m_inDip);
 
-        // === Indexer voltage control ===
-        m_indexerMotor.setVoltage(m_indexerState.volts);
+        // === Indexer control ===
+        // Velocity-controlled (flag on) for a load-independent feed cadence, or the legacy
+        // open-loop voltage (flag off) as the A/B fallback. Live gain re-apply mirrors the
+        // flywheel; single '|' so every hasChanged() is polled (each tracks its own state).
+        if (FeatureFlags.INDEXER_VELOCITY_CONTROL.getAsBoolean()) {
+            if (m_indexerKp.hasChanged() | m_indexerKs.hasChanged() | m_indexerKv.hasChanged()) {
+                m_indexerMotor.getConfigurator().apply(new Slot0Configs()
+                    .withKP(m_indexerKp.get()).withKS(m_indexerKs.get()).withKV(m_indexerKv.get()));
+            }
+            double indexerRps = switch (m_indexerState) {
+                case ZERO -> 0.0;
+                case SCORE -> -m_indexerFeedRps.get();   // negative = feed into the drum
+                case REVERSE -> m_indexerFeedRps.get();  // positive = back a jam toward the intake
+            };
+            if (indexerRps == 0.0) {
+                m_indexerMotor.stopMotor();
+            } else {
+                m_indexerMotor.setControl(m_indexerVelocityRequest.withVelocity(indexerRps));
+            }
+        } else {
+            m_indexerMotor.setVoltage(m_indexerState.volts);
+        }
+        SmartDashboard.putNumber("indexer rps", m_indexerMotor.getVelocity().getValueAsDouble());
         SmartDashboard.putNumber("shooter current draw", getAvgShooterCurrentDraw());
         double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
         SmartDashboard.putNumber("shooter position", pivotOutputRot);
@@ -630,6 +665,7 @@ public class Shooter extends SubsystemBase {
         DogLog.log("Shooter/AvgCurrentA", getAvgShooterCurrentDraw());
         DogLog.log("Shooter/IndexerCurrentA", indexerCurrent);
         DogLog.log("Shooter/IndexerVolts", m_indexerState.volts);
+        DogLog.log("Shooter/IndexerRps", m_indexerMotor.getVelocity().getValueAsDouble());
         DogLog.log("Shooter/PivotState", m_pivotState.toString());
         DogLog.log("Shooter/ShooterState", m_shooterState.toString());
         DogLog.log("Shooter/IndexerState", m_indexerState.toString());

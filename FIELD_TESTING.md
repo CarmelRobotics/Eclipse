@@ -109,6 +109,16 @@ get filled in.
 - [ ] **Write final offset values in the table above** — they do NOT survive a
       reboot; we bake them into ShooterConstants afterward
 
+**Indexer consistency A/B** (the indexer is velocity-controlled by default now):
+- [ ] Fire a volley, note the spread. Flip `FeatureFlags/IndexerVelocityControl` OFF (reverts
+      to open-loop voltage), fire again, compare. Velocity control should tighten the spread
+      by holding a steady feed cadence when the hopper's stacked
+- [ ] Watch `indexer rps` — in velocity mode it should hold ~`IndexerFeedRps` (37.5) through
+      the volley instead of sagging. If it can't hold, raise `ShotTuning/IndexerKp`; if the
+      feed rate itself is wrong, tune `ShotTuning/IndexerFeedRps`
+- [ ] Watch for `indexer overcurrent tripped` — velocity control pulls more current under a
+      stacked load than voltage did; if it nuisance-trips, raise `ShotTuning/IndexerCurrentLimitA`
+
 **Shoot-on-the-move** (after stationary is dialed):
 - [ ] Strafe at ~30–50% while holding RT from 2.5 m: shots still land.
       Too much lead → lower `ShotTuning/MoveCompGain` (0.7 default, 0 = no lead)

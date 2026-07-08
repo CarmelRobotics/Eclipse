@@ -322,7 +322,7 @@ While aiming, driver translation is scaled by `ShotTuning/ShootingSpeedScale` (d
 |---|---|---|---|
 | Flywheel drum, 4 in wheels, 1:1 | 7 (left leader), 8 (back-left), 11 (right), 49 (back-right) | `VelocityVoltage`, all four commanded identically | kP 0.3, kI 0, kD 0, kS 0.15, kV 0.125, kA 0.2 · supply 35 A, stator 100 A |
 | Pivot, 42:1 | 5 (leader, CW+), 6 (follower, CCW+) | `MotionMagicVoltage` position | kP 4.8, kD 0.1, kS 0.25, kV 0.12, kA 0.01 · MM cruise 80 / accel 160 / jerk 1600 (motor rot) · supply 30 A |
-| Indexer/kicker | 53 (Kraken X44) | Direct voltage | ±4.5 V · supply 30 A |
+| Indexer/kicker | 53 (Kraken X44) | Velocity (flag) / voltage fallback | Slot0 kP 0.11 / kS 0.1 / kV 0.12 · ±37.5 rps or ∓4.5 V · supply 30 A |
 
 Left and right flywheel pairs carry opposite inverts in their configs, so a single identical velocity command spins both sides of the drum correctly — there is no Phoenix `Follower` setup, by design, so the SysId routine and the self-test can observe each motor independently.
 
@@ -621,7 +621,7 @@ A ~60-line utility modeled on the 6328/1678/2910 pattern, backed by SmartDashboa
 
 ### 13.4 Feature flags
 
-`FeatureFlags` (in `config`, boolean analog of the tunable numbers, backed by `FeatureFlag`) exposes dashboard toggles under `FeatureFlags/*` for disabling a behavior live without a redeploy — the field escape hatches when something misbehaves mid-session: `VisionFusion` (off → pure odometry), `ShootOnTheMove` (off → aim as if stationary), `ShiftsGate` and `AllianceZoneGate` (off → force a hub-shot offer regardless of SHIFTS state or field position), `IdleSpin`, `DriverAssists`, and `PowerManager`. Unlike tunable numbers these are **always live** (not gated by tuning mode) — intervening during a match is the entire point — and every flag defaults to the normal robot, so an untouched flag changes nothing. Each is wired at the single point where its behavior branches (the vision loop, the shot solver's lead term, the right-trigger condition, the idle-spin computation, the assist trigger, the power manager).
+`FeatureFlags` (in `config`, boolean analog of the tunable numbers, backed by `FeatureFlag`) exposes dashboard toggles under `FeatureFlags/*` for disabling a behavior live without a redeploy — the field escape hatches when something misbehaves mid-session: `VisionFusion` (off → pure odometry), `ShootOnTheMove` (off → aim as if stationary), `ShiftsGate` and `AllianceZoneGate` (off → force a hub-shot offer regardless of SHIFTS state or field position), `IdleSpin`, `DriverAssists`, `IndexerVelocityControl` (velocity vs. legacy open-loop voltage feed — kept as a flag so shot consistency can be A/B'd directly), and `PowerManager`. Unlike tunable numbers these are **always live** (not gated by tuning mode) — intervening during a match is the entire point — and every flag defaults to the normal robot, so an untouched flag changes nothing. Each is wired at the single point where its behavior branches (the vision loop, the shot solver's lead term, the right-trigger condition, the idle-spin computation, the assist trigger, the power manager).
 
 ### 13.3 The field workflow
 
@@ -758,6 +758,8 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 | `ShotTuning/PassPivotRot` | 0.086 | Pass launch angle (higher = flatter) |
 | `ShotTuning/PassCornerInsetM` | 1.0 | Pass aim point inset from corner walls |
 | `ShotTuning/FlywheelKp / Ks / Kv` | 0.3 / 0.15 / 0.125 | Live flywheel gains (re-applied on change) |
+| `ShotTuning/IndexerFeedRps` | 37.5 | Indexer feed/reverse speed (velocity-control mode) |
+| `ShotTuning/IndexerKp / Ks / Kv` | 0.11 / 0.1 / 0.12 | Live indexer velocity gains (re-applied on change) |
 | `ShotTuning/ShotBlockPivotPosition` | 0.5 | Blocker-clearance pivot position |
 | `ShotTuning/PivotCurrentLimitA / PivotCurrentTimeoutS` | 40 / 0.25 | Pivot overcurrent trip |
 | `ShotTuning/IndexerCurrentLimitA / IndexerCurrentTimeoutS` | 25 / 0.2 | Indexer overcurrent trip |
@@ -791,6 +793,7 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 | `AllianceZoneGate` | Right trigger offers HUB regardless of field position |
 | `IdleSpin` | Flywheel only spins on a shot command |
 | `DriverAssists` | Fully manual driving everywhere |
+| `IndexerVelocityControl` | Indexer reverts to open-loop voltage feed |
 | `PowerManager` (default **OFF**) | Static compiled current limits (IDLE mode) |
 
 **Power modes** (supply amps per motor, applied by `PowerManager` on the desired-mode change):
