@@ -455,7 +455,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 // left to the Pigeon and the aim target never chatters.
                 Rotation2d headingToUse = getState().Pose.getRotation();
                 boolean adoptVisionHeading = false;
-                if (estimate.tagCount >= 2) {
+                // Gated OFF by default: the seed trusts the Limelight mounting yaw, and a bad
+                // camera pose flips the field-centric frame (reverses controls). With the flag
+                // off, the gyro owns heading exactly as before -- snap keeps gyro rotation,
+                // fuse never touches heading. Enable only after verifying the camera yaw.
+                if (FeatureFlags.VISION_HEADING_SEED.getAsBoolean() && estimate.tagCount >= 2) {
                     double headingErrDeg = Math.toDegrees(Math.abs(MathUtil.angleModulus(
                         estimate.pose.getRotation().minus(getState().Pose.getRotation()).getRadians())));
                     if (!m_headingSeededFromVision || headingErrDeg > kVisionHeadingSeedToleranceDegrees) {

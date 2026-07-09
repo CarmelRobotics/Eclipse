@@ -24,6 +24,13 @@ public final class FeatureFlags {
   /** Fuse Limelight pose into odometry. Off = wheel odometry only (still aims, just drifts). */
   public static final BooleanSupplier VISION_FUSION = FeatureFlag.of("VisionFusion", true);
 
+  /** Seed the gyro heading from multi-tag vision (removes the aim single-point-of-failure).
+   *  Default OFF: it trusts the camera's mounting yaw, so a mis-calibrated Limelight pose flips
+   *  the field-centric frame and reverses the controls. Enable ONLY after verifying the
+   *  Limelight camera-pose yaw in its web UI (a two-tag look should leave "vision/heading
+   *  seeded" true AND driving normal). Until then, the gyro owns heading as before. */
+  public static final BooleanSupplier VISION_HEADING_SEED = FeatureFlag.of("VisionHeadingSeed", false);
+
   /** Motion-compensate the aim. Off = aim at the hub as if the robot were stationary. */
   public static final BooleanSupplier SHOOT_ON_THE_MOVE = FeatureFlag.of("ShootOnTheMove", true);
 
