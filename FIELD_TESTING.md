@@ -54,10 +54,12 @@ write numbers down IN THIS DOC (or a photo of it) so tuning survives the drive h
       (occasional +1 after being carried/lost is fine — steady climbing means it's
       snapping every frame: check camera mount/config)
 - [ ] `vision/tag count` ≥ 1 when facing tags; `hub visible` true
-- [ ] **`vision/heading seeded` goes true** after you face a **two-tag** view — this is the
-      gyro getting field-aligned from vision. Aim trusts the gyro heading, so if this is
-      still false, aiming is running on an unseeded/possibly-wrong heading. It re-aligns
-      automatically if the gyro ever diverges >10° from a multi-tag read (bump recovery)
+- [ ] **Controls sanity on BOTH alliances.** The operator perspective is flipped 180° from
+      textbook (blue=180/red=0) to match this robot's driver-forward. Set DS to **Red**,
+      seed field-centric (POV-down), push forward → robot goes downfield (away from you).
+      Then set DS to **Blue** and confirm forward is *still* downfield. If Blue is backward,
+      the inversion is alliance-dependent — stop and flag it (it'd be a heading issue, not a
+      perspective one)
 - [ ] **Cover the Limelight** and drive ~5 s: pose keeps moving on odometry (slow
       drift OK, freeze/jump = problem). Uncover: pose corrects smoothly, no violent snap
 - [ ] Spin in place 2–3 turns, drive back to the measured spot: pose still ≈ truth
