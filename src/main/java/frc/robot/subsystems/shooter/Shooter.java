@@ -92,6 +92,14 @@ public class Shooter extends SubsystemBase {
     // Pass launch angle (output rot; higher = flatter). Flatter than LOB on purpose to
     // tame backspin bounce-back on ferry landings -- see kPassPivotPosition.
     private final LoggedTunableNumber m_passPivotPosition = new LoggedTunableNumber(ShooterConstants.kPassPivotPositionKey, ShooterConstants.kPassPivotPosition);
+    // Hard upper limit on pivot travel for FEEDING states (SCORE/PASS). Beyond this the hood
+    // is rotated too far up (too flat) for the kicker to push a ball through -- it simply
+    // won't feed. Far-shot and pass targets are clamped to this. Default = the LOB feed limit
+    // (~0.0694 rot = 45 deg launch, which is also the max-range angle, so nothing useful is
+    // lost). Lower it live if a shot STILL won't feed at range. SHOT_BLOCK is exempt (it's a
+    // blocker pose, not a feed).
+    private final LoggedTunableNumber m_maxFeedablePivot =
+        new LoggedTunableNumber("ShotTuning/MaxFeedablePivotRot", ShooterConstants.kLobPivotPosition);
     private final LoggedTunableNumber m_shotBlockPivotPosition = new LoggedTunableNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
     private final LoggedTunableNumber m_pivotCurrentLimit = new LoggedTunableNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
     private final LoggedTunableNumber m_pivotCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
@@ -431,7 +439,10 @@ public class Shooter extends SubsystemBase {
         boolean spunUp = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetPassRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
         double currentPivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
-        boolean pivotReady = Math.abs(currentPivotOutputRot - m_passPivotPosition.get())
+        // Gate against the clamped pass target so readiness matches what the pivot is actually
+        // commanded to (a pass angle above the feed limit is clamped in periodic()).
+        double passPivotTarget = Math.min(m_passPivotPosition.get(), m_maxFeedablePivot.get());
+        boolean pivotReady = Math.abs(currentPivotOutputRot - passPivotTarget)
             <= ShooterConstants.kPivotReadyToleranceRotations;
         boolean aimed = Math.abs(m_drive.getPassHeadingError().getDegrees())
             <= ShooterConstants.kPassHeadingToleranceDegrees;
@@ -454,6 +465,9 @@ public class Shooter extends SubsystemBase {
         // add the live offsets so the driver can trim without redeploying.
         double shotDistance = m_drive.getShotDistance();
         m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
+        // Never command past the feed limit -- past it the kicker can't push the ball through
+        // (higher rot = flatter = past the feed point). Also caps a stray positive pivot offset.
+        m_targetPivotPosition = Math.min(m_targetPivotPosition, m_maxFeedablePivot.get());
         m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
         m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
 
@@ -492,7 +506,7 @@ public class Shooter extends SubsystemBase {
             case STOW -> setPivotPosition(ShooterConstants.kStowPivotPosition);
             case SCORE -> setPivotPosition(m_targetPivotPosition);
             case LOB -> setPivotPosition(ShooterConstants.kLobPivotPosition);
-            case PASS -> setPivotPosition(m_passPivotPosition.get());
+            case PASS -> setPivotPosition(Math.min(m_passPivotPosition.get(), m_maxFeedablePivot.get()));
             case SHOT_BLOCK -> setPivotPosition(m_shotBlockPivotPosition.get());
         }
 
