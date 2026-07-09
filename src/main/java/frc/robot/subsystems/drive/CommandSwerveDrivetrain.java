@@ -64,15 +64,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // tag is in view, vision positioning is broken -- check the Limelight name and NT.
     private int m_visionPoseResets = 0;
 
-    // Whether a multi-tag vision heading has field-aligned the gyro yet. Until this is true,
-    // aiming is trusting an unseeded gyro heading -- watch "vision/heading seeded" on the
-    // dashboard before relying on aim (or just glance at a tag to seed it).
-    private boolean m_headingSeededFromVision = false;
-    // Re-align the gyro heading to a multi-tag vision heading only when they disagree by more
-    // than this. Bigger than normal jitter/drift (a few degrees), so the Pigeon keeps owning
-    // fine rotation and only a genuine divergence (bump, bad seed) triggers a re-align.
-    private static final double kVisionHeadingSeedToleranceDegrees = 10.0;
-
     // Live aim trim (degrees). Corrects a constant left/right bias in where shots land,
     // e.g. the shooter not sitting perfectly square on the frame. Tune on the field in
     // 1-degree steps: if shots move the wrong way, flip the sign. Bake the final value
@@ -444,44 +435,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             // FeatureFlags.VisionFusion off -> read + publish diagnostics but never touch the
             // pose (pure wheel odometry). The field escape hatch if the camera goes bad.
             if (FeatureFlags.VISION_FUSION.getAsBoolean()) {
-                // === Heading field-alignment ===
-                // The Pigeon still OWNS fine rotation (translation fusion below never touches
-                // heading), but the gyro has to be field-aligned in the first place or every
-                // aim is off by the misalignment forever -- there is no other heading
-                // correction. So use MULTI-TAG botpose heading (unambiguous, unlike a single
-                // tag) to seed that alignment: adopt it once, and re-adopt only if the gyro
-                // has since diverged by more than the tolerance (a bump, a bad auto seed, or
-                // no seed at all). Small disagreements are ignored, so normal jitter/drift is
-                // left to the Pigeon and the aim target never chatters.
-                Rotation2d headingToUse = getState().Pose.getRotation();
-                boolean adoptVisionHeading = false;
-                // Gated OFF by default: the seed trusts the Limelight mounting yaw, and a bad
-                // camera pose flips the field-centric frame (reverses controls). With the flag
-                // off, the gyro owns heading exactly as before -- snap keeps gyro rotation,
-                // fuse never touches heading. Enable only after verifying the camera yaw.
-                if (FeatureFlags.VISION_HEADING_SEED.getAsBoolean() && estimate.tagCount >= 2) {
-                    double headingErrDeg = Math.toDegrees(Math.abs(MathUtil.angleModulus(
-                        estimate.pose.getRotation().minus(getState().Pose.getRotation()).getRadians())));
-                    if (!m_headingSeededFromVision || headingErrDeg > kVisionHeadingSeedToleranceDegrees) {
-                        headingToUse = estimate.pose.getRotation();
-                        adoptVisionHeading = true;
-                        m_headingSeededFromVision = true;
-                    }
-                }
-
                 if (visionDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
-                    // Grossly off: snap to vision XY (and the just-decided heading).
-                    resetPose(new Pose2d(estimate.pose.getTranslation(), headingToUse));
+                    // Grossly off: snap to vision XY, keep the gyro's heading (vision heading
+                    // jitters a few degrees; the Pigeon owns rotation).
+                    resetPose(new Pose2d(
+                        estimate.pose.getTranslation(),
+                        getState().Pose.getRotation()
+                    ));
                     m_visionPoseResets++;
                 } else {
-                    // Adopting a new heading this loop needs an explicit resetPose -- the
-                    // Kalman fuse below is translation-only (infinite heading sigma).
-                    if (adoptVisionHeading) {
-                        resetPose(new Pose2d(getState().Pose.getTranslation(), headingToUse));
-                    }
-                    // Tracking: fuse translation. Trust falls off with tag distance -- close
-                    // tags give centimeter solutions, far single tags wander. sigma = 0.05 +
-                    // 0.02*d^2 (0.07 m at 1 m, 0.13 m at 2 m, 0.37 m at 4 m).
+                    // Tracking: fuse translation only (infinite heading sigma -- Pigeon owns
+                    // rotation). sigma = 0.05 + 0.02*d^2 (0.07 m at 1 m, 0.37 m at 4 m).
                     double xyStdDev = 0.05 + 0.02 * estimate.avgTagDist * estimate.avgTagDist;
                     addVisionMeasurement(
                         estimate.pose,
@@ -521,7 +485,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
         SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
         SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
-        SmartDashboard.putBoolean("vision/heading seeded", m_headingSeededFromVision);
         // Aim sanity checks: WHICH hub the shot math is targeting and the heading it
         // wants. If "dist to hub" doesn't match a tape measure, everything downstream
         // (hood angle, RPS, aim) is being computed for the wrong target.
