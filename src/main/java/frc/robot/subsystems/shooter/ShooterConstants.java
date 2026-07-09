@@ -58,24 +58,18 @@ public final class ShooterConstants {
     public static final double kIdleShedVoltage = 7.0;
     public static final double kLobShooterRps = 40;          // ferry shot (slower pass through field)
     public static final double kSendShooterRps = 90;         // long ferry shot (fast pass)
-    public static final double kStowPivotPosition = 0.025;       // stow angle (output rotations)
+    public static final double kStowPivotPosition = 0;       // stow angle (output rotations)
     // LOB/SEND pivot: full feedable travel (~25°) for flattest kicker-feedable launch.
     // 25 deg is the kicker FEED limit, not a travel limit -- the pivot travels much
     // farther (SHOT_BLOCK commands 0.5 rot). SCORE table entries may sit above this;
     // they fed fine on the field.
     public static final double kLobPivotPosition = 25.0 / 360.0;  // ~0.0694 output rotations
-    // FEED LIMIT (output rot): the flattest hood angle the kicker can still push a ball
-    // through. Field-confirmed the LOB angle (0.069) is TOO FLAT to feed; 0.065 (the working
-    // 2.5 m angle) feeds, and feed geometry depends only on hood angle, not distance, so this
-    // feeds at any range. SCORE and PASS pivot are clamped to this; lower it if a shot still
-    // won't feed (live via ShotTuning/MaxFeedablePivotRot).
-    public static final double kMaxFeedablePivotPosition = 0.065;
-    // PASS pivot: at the feed limit. Originally set FLATTER (0.086) to reduce backspin
-    // bounce-back on landing, but that is PAST the kicker feed point -- it won't feed
-    // (field-confirmed). So the pass launches at the flattest angle that actually feeds;
-    // backspin bounce is instead managed by aiming deep into the corner
+    // PASS pivot: at the LOB feed limit (0.069). Originally set FLATTER (0.086) to reduce
+    // backspin bounce-back on landing, but that is PAST the kicker feed point -- it won't
+    // feed (field-confirmed). So the pass launches at the flattest angle that actually
+    // feeds; backspin bounce is instead managed by aiming deep into the corner
     // (kPassCornerInsetMeters). Clamped by ShotTuning/MaxFeedablePivotRot in Shooter.java.
-    public static final double kPassPivotPosition = kMaxFeedablePivotPosition;
+    public static final double kPassPivotPosition = 0.069;
     // SHOT_BLOCK: raise the shooter to block incoming shots. 0.5 rot (~180 deg) is real,
     // reachable travel -- the pivot's range extends far past the 25 deg feed limit
     // (confirmed on the robot; 25 deg is only where the kicker stops being able to feed).
@@ -239,16 +233,16 @@ public final class ShooterConstants {
         // +0.02 over the re-anchored curve, so +0.02 is baked straight in. Entries past
         // ~3 m sit above the 25 deg LOB feed limit -- that's fine for SCORE shots on this
         // mechanism (25 deg is a feed limit, not a travel limit, and these fed fine).
-        // FEED LIMIT: the kicker can't feed past kMaxFeedablePivotPosition (0.065 -- field-
-        // confirmed 0.069+ won't feed). The hood SATURATES at the feed limit from 2.5 m out
-        // and range is carried by RPS instead. ~0.065 rot is ~47 deg launch, right at the
-        // max-range angle, so little is lost aerodynamically. Shooter.java also clamps to
-        // ShotTuning/MaxFeedablePivotRot as a backstop against a stray offset.
+        // FEED LIMIT: the kicker can't push a ball through past ~0.069 rot (the LOB angle,
+        // ~45 deg launch). Field-confirmed that 0.076+ won't feed, so the hood SATURATES at
+        // the feed limit from 3.5 m out and range is carried by RPS instead. 45 deg is also
+        // the max-range launch angle, so nothing is lost aerodynamically. Shooter.java clamps
+        // to ShotTuning/MaxFeedablePivotRot as a backstop against a stray offset.
         ScorePivotPositionByDistance.put(1.5, 0.046);
-        ScorePivotPositionByDistance.put(2.5, kMaxFeedablePivotPosition);
-        ScorePivotPositionByDistance.put(3.5, kMaxFeedablePivotPosition);
-        ScorePivotPositionByDistance.put(4.5, kMaxFeedablePivotPosition);
-        ScorePivotPositionByDistance.put(5.0, kMaxFeedablePivotPosition);  // covers the 5 m range gate
+        ScorePivotPositionByDistance.put(2.5, 0.065);
+        ScorePivotPositionByDistance.put(3.5, 0.069);
+        ScorePivotPositionByDistance.put(4.5, 0.069);
+        ScorePivotPositionByDistance.put(5.0, 0.069);  // table must cover the 5 m range gate
 
         // Flywheel speed (RPS) by distance, matched to the re-anchored (flatter) hood
         // curve above: v^2 = g*d^2 / (2*cos^2(theta)*(d*tan(theta) - dh)) per distance,

@@ -99,7 +99,7 @@ public class Shooter extends SubsystemBase {
     // lost). Lower it live if a shot STILL won't feed at range. SHOT_BLOCK is exempt (it's a
     // blocker pose, not a feed).
     private final LoggedTunableNumber m_maxFeedablePivot =
-        new LoggedTunableNumber("ShotTuning/MaxFeedablePivotRot", ShooterConstants.kMaxFeedablePivotPosition);
+        new LoggedTunableNumber("ShotTuning/MaxFeedablePivotRot", ShooterConstants.kLobPivotPosition);
     private final LoggedTunableNumber m_shotBlockPivotPosition = new LoggedTunableNumber(ShooterConstants.kShotBlockPivotPositionKey, ShooterConstants.kShotBlockPivotPosition);
     private final LoggedTunableNumber m_pivotCurrentLimit = new LoggedTunableNumber(ShooterConstants.kPivotCurrentLimitKey, 40.0);
     private final LoggedTunableNumber m_pivotCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kPivotCurrentTimeoutKey, 0.25);
