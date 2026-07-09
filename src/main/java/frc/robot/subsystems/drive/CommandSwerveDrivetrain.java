@@ -496,6 +496,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putNumber("vision/pose y", estimate.pose.getY());
             SmartDashboard.putNumber("vision/tag count", estimate.tagCount);
             SmartDashboard.putNumber("vision/avg tag dist", estimate.avgTagDist);
+            // Camera-yaw diagnostic: with the gyro seeded correctly, this vision heading
+            // should MATCH "pose heading". If it's ~180 deg off, the Limelight mounting yaw
+            // is wrong -- that mismatch is what reverses controls when the heading seed is on.
+            SmartDashboard.putNumber("vision/pose heading deg", estimate.pose.getRotation().getDegrees());
+            SmartDashboard.putNumber("pose heading deg", getState().Pose.getRotation().getDegrees());
         }
 
         // Solve the shoot-on-the-move aim for this loop (after vision so it uses the
