@@ -99,7 +99,7 @@ public final class LintakeConstants {
     public enum RollerState {
         ZERO(0),
         EJECT(-12),
-        INTAKE(12);
+        INTAKE(-7);
 
         public final double volts;
 
