@@ -751,6 +751,10 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 |---|---|---|
 | `ShotTuning/HeadingOffsetDeg` | 0 | Mechanical aim trim (1° steps; applies to hub and pass bearing) |
 | `ShotTuning/MoveCompGain` | 0.7 | Shoot-on-the-move velocity lead scale (0 = aim as if stationary) |
+| `ShotTuning/ImpactCompGain` | 1.0 | Acceleration lead scale after a detected drivetrain disturbance |
+| `ShotTuning/ImpactJerkThreshold` | 100.0 m/s³ | Pigeon jerk that arms impact compensation |
+| `ShotTuning/ImpactCompDuration` | 0.30 s | Duration of the transient impact compensation window |
+| `ShotTuning/TiltPivotGain` | 1.0 | Scale for the tilt-derived pivot correction |
 | `ShotTuning/ShootingSpeedScale` | 0.45 | Translation cap while aiming |
 | `ShotTuning/PivotOffset` | 0 | Shifts entire hub pivot table |
 | `ShotTuning/ShooterRpsOffset` | 0 | Shifts entire hub RPS table |
@@ -766,6 +770,10 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 | `ShotTuning/IndexerCurrentLimitA / IndexerCurrentTimeoutS` | 25 / 0.2 | Indexer overcurrent trip |
 | Shot-detection dip / recover thresholds | 5.0 / 2.0 RPS | Ball-passage detector sensitivity |
 | `Sim/PoseX / PoseY / PoseHeadingDeg` | 4.6 / 0.75 / 0 | Pose-setter inputs |
+
+### Tilt and impact compensation (added)
+
+The cached shot solution now transforms the calibrated 3D trajectory through the inverse Pigeon pitch/roll. Its horizontal projection updates aim bearing and distance, while the elevation change produces a pivot correction. `ShotTuning/TiltPivotGain` defaults to 1.0. The Pigeon X/Y acceleration is filtered and differentiated into jerk; a sharp jerk event arms a short-lived window, while filtered drivetrain acceleration supplies the `1/2*a*t^2` lead so a hit while aiming is accounted for during ball flight. Tune `ShotTuning/ImpactJerkThreshold`, `ShotTuning/ImpactCompGain`, and `ShotTuning/ImpactCompDuration` from logs. Both behaviors can be disabled through `FeatureFlags/TiltCompensation` and `FeatureFlags/ImpactCompensation` and should be validated with low-speed bump tests before match use.
 
 ## Appendix D: CAN ID Map
 

@@ -453,7 +453,8 @@ public class Shooter extends SubsystemBase {
         // we interpolate the shot table to get the pivot and RPS for that distance, then
         // add the live offsets so the driver can trim without redeploying.
         double shotDistance = m_drive.getShotDistance();
-        m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
+        m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(
+            ShooterConstants.getScorePivotPosition(shotDistance)) + m_pivotOffset.get();
         m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
         m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
 

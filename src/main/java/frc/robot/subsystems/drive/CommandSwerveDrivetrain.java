@@ -23,7 +23,9 @@ import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.filter.LinearFilter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.geometry.Translation3d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
@@ -88,10 +90,27 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // moves far less under the driver, at the cost of a little accuracy at max speed.
     private final LinearFilter m_shotVelFilterX = LinearFilter.singlePoleIIR(0.15, 0.02);
     private final LinearFilter m_shotVelFilterY = LinearFilter.singlePoleIIR(0.15, 0.02);
+    private final LinearFilter m_pigeonAccelFilterX = LinearFilter.singlePoleIIR(0.05, 0.02);
+    private final LinearFilter m_pigeonAccelFilterY = LinearFilter.singlePoleIIR(0.05, 0.02);
     private final LoggedTunableNumber m_moveCompGain =
         new LoggedTunableNumber("ShotTuning/MoveCompGain", 0.7);
+    private final LoggedTunableNumber m_impactCompGain =
+        new LoggedTunableNumber("ShotTuning/ImpactCompGain", 1.0);
+    private final LoggedTunableNumber m_impactJerkThreshold =
+        new LoggedTunableNumber("ShotTuning/ImpactJerkThreshold", 100.0);
+    private final LoggedTunableNumber m_impactCompDuration =
+        new LoggedTunableNumber("ShotTuning/ImpactCompDuration", 0.30);
+    private final LoggedTunableNumber m_tiltPivotGain =
+        new LoggedTunableNumber("ShotTuning/TiltPivotGain", 1.0);
     private Translation2d m_shotVector = new Translation2d(1, 0);
     private double m_shotTofSeconds = 0.5;
+    private double m_tiltPivotCorrectionRotations = 0.0;
+    private Translation2d m_filteredFieldVelocity = new Translation2d();
+    private Translation2d m_previousPigeonAcceleration = new Translation2d();
+    private Translation2d m_impactAcceleration = new Translation2d();
+    private double m_impactCompensationRemaining = 0.0;
+    private double m_impactCooldownRemaining = 0.0;
+    private double m_impactJerk = 0.0;
 
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
@@ -424,7 +443,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             LimelightHelpers.SetRobotOrientation(
                     limelight.name(), getState().Pose.getRotation().getDegrees(),
                     getPigeon2().getAngularVelocityZWorld().getValueAsDouble(),
-                    0, 0, 0, 0
+                    getPigeon2().getPitch().getValueAsDouble(),
+                    getPigeon2().getAngularVelocityYWorld().getValueAsDouble(),
+                    getPigeon2().getRoll().getValueAsDouble(),
+                    getPigeon2().getAngularVelocityXWorld().getValueAsDouble()
                 );
 
             final LimelightHelpers.PoseEstimate estimate =
@@ -746,10 +768,39 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // Low-pass the field velocity used for lead (~0.15 s time constant): the aim
         // target follows real acceleration but stops chattering with module noise.
         ChassisSpeeds speeds = getFieldRelativeSpeeds();
-        Translation2d lead = new Translation2d(
+        Translation2d filteredVelocity = new Translation2d(
             m_shotVelFilterX.calculate(speeds.vxMetersPerSecond),
-            m_shotVelFilterY.calculate(speeds.vyMetersPerSecond)
-        ).times(m_moveCompGain.get());
+            m_shotVelFilterY.calculate(speeds.vyMetersPerSecond));
+
+        Translation2d acceleration = filteredVelocity.minus(m_filteredFieldVelocity).times(50.0);
+        m_filteredFieldVelocity = filteredVelocity;
+        // The Pigeon is the impact detector: a collision has a sharp change in
+        // acceleration (jerk), unlike a normal deliberate driver acceleration.
+        Translation2d pigeonAcceleration = new Translation2d(
+            m_pigeonAccelFilterX.calculate(getPigeon2().getAccelerationX().getValueAsDouble()),
+            m_pigeonAccelFilterY.calculate(getPigeon2().getAccelerationY().getValueAsDouble()));
+        Translation2d jerk = pigeonAcceleration.minus(m_previousPigeonAcceleration).times(50.0);
+        m_previousPigeonAcceleration = pigeonAcceleration;
+        m_impactJerk = jerk.getNorm();
+        m_impactCooldownRemaining = Math.max(0.0, m_impactCooldownRemaining - 0.02);
+        if (FeatureFlags.IMPACT_COMPENSATION.getAsBoolean()
+                && m_impactCooldownRemaining <= 0.0
+                && m_impactJerk >= m_impactJerkThreshold.get()) {
+            m_impactCompensationRemaining = m_impactCompDuration.get();
+            m_impactCooldownRemaining = 0.15;
+        }
+        m_impactCompensationRemaining = Math.max(0.0, m_impactCompensationRemaining - 0.02);
+        m_impactAcceleration = FeatureFlags.IMPACT_COMPENSATION.getAsBoolean()
+            && m_impactCompensationRemaining > 0.0 ? acceleration : new Translation2d();
+
+        Translation2d lead = filteredVelocity.times(m_moveCompGain.get());
+        if (FeatureFlags.IMPACT_COMPENSATION.getAsBoolean()) {
+            // The robot's future displacement is v*t + 1/2*a*t^2. This extra term is
+            // deliberately short-lived: it catches the velocity change caused by a hit
+            // without making normal driver acceleration permanently unstable.
+            lead = lead.plus(m_impactAcceleration.times(
+                0.5 * m_impactCompGain.get() * m_shotTofSeconds * m_shotTofSeconds));
+        }
         // FeatureFlags.ShootOnTheMove off -> zero the lead (aim as if stationary). The
         // filters still run above so they stay warm if it's toggled back on mid-match.
         if (!FeatureFlags.SHOOT_ON_THE_MOVE.getAsBoolean()) {
@@ -768,10 +819,53 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
         m_shotVector = shotVector;
         m_shotTofSeconds = tof;
+
+        // Apply tilt after the horizontal moving-shot solve. The table's nominal pivot
+        // angle supplies the calibrated world launch angle; rotating that 3D trajectory
+        // through the inverse Pigeon pitch/roll gives both the corrected heading and the
+        // pivot correction needed to preserve the same world trajectory.
+        m_tiltPivotCorrectionRotations = 0.0;
+        if (FeatureFlags.TILT_COMPENSATION.getAsBoolean()) {
+            double nominalPivotRotations = ShooterConstants.getScorePivotPosition(
+                MathUtil.clamp(shotVector.getNorm(), 0, 6));
+            double nominalLaunchAngleDeg = 70.0 - nominalPivotRotations * 360.0;
+            double horizontalDistance = Math.max(0.05, shotVector.getNorm());
+            double nominalZ = horizontalDistance * Math.tan(Math.toRadians(nominalLaunchAngleDeg));
+
+            Translation2d robotFrameHorizontal = shotVector.rotateBy(
+                getState().Pose.getRotation().unaryMinus());
+            Translation3d targetVector = new Translation3d(
+                robotFrameHorizontal.getX(), robotFrameHorizontal.getY(), nominalZ);
+            Rotation3d tilt = new Rotation3d(
+                Math.toRadians(getPigeon2().getRoll().getValueAsDouble()),
+                Math.toRadians(getPigeon2().getPitch().getValueAsDouble()), 0);
+            Translation3d untiltedTarget = targetVector.rotateBy(tilt.inverse());
+
+            m_shotVector = new Translation2d(untiltedTarget.getX(), untiltedTarget.getY())
+                .rotateBy(getState().Pose.getRotation());
+            double correctedLaunchAngleDeg = Math.toDegrees(Math.atan2(
+                untiltedTarget.getZ(), Math.hypot(untiltedTarget.getX(), untiltedTarget.getY())));
+            m_tiltPivotCorrectionRotations = -m_tiltPivotGain.get()
+                * (correctedLaunchAngleDeg - nominalLaunchAngleDeg) / 360.0;
+            m_shotTofSeconds = Math.max(0.001,
+                ShooterConstants.getShotTimeOfFlightSeconds(m_shotVector.getNorm()) + tofOffset);
+        }
+
+        SmartDashboard.putNumber("aim/pitch deg", getPigeon2().getPitch().getValueAsDouble());
+        SmartDashboard.putNumber("aim/roll deg", getPigeon2().getRoll().getValueAsDouble());
+        SmartDashboard.putNumber("aim/tilt pivot correction rot", m_tiltPivotCorrectionRotations);
+        SmartDashboard.putNumber("aim/impact acceleration", m_impactAcceleration.getNorm());
+        SmartDashboard.putNumber("aim/impact jerk", m_impactJerk);
+        SmartDashboard.putNumber("aim/impact compensation remaining", m_impactCompensationRemaining);
     }
 
     public double getShotTimeOfFlightSeconds() {
         return m_shotTofSeconds;
+    }
+
+    /** Returns the calibrated score pivot position corrected for current robot tilt. */
+    public double getTiltCompensatedPivotPosition(double nominalPivotPosition) {
+        return nominalPivotPosition + m_tiltPivotCorrectionRotations;
     }
 
     public Translation2d getMotionCompensatedShotVector() {
