@@ -775,6 +775,16 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 
 The cached shot solution now transforms the calibrated 3D trajectory through the inverse Pigeon pitch/roll. Its horizontal projection updates aim bearing and distance, while the elevation change produces a pivot correction. `ShotTuning/TiltPivotGain` defaults to 1.0. The Pigeon X/Y acceleration is filtered and differentiated into jerk; a sharp jerk event arms a short-lived window, while filtered drivetrain acceleration supplies the `1/2*a*t^2` lead so a hit while aiming is accounted for during ball flight. Tune `ShotTuning/ImpactJerkThreshold`, `ShotTuning/ImpactCompGain`, and `ShotTuning/ImpactCompDuration` from logs. Both behaviors can be disabled through `FeatureFlags/TiltCompensation` and `FeatureFlags/ImpactCompensation` and should be validated with low-speed bump tests before match use.
 
+### Offline trajectory-map generator
+
+`tools/generate_trajectory_map.py` searches launch angle and ball speed for every distance/radial-velocity cell. It scores candidates by the smallest vertical margin to the modeled hub-opening boundaries across angle, speed, and velocity error corners. Positive `robust_margin_m` values meet the requested uncertainty budget; negative values identify cells that need more speed range, a wider valid opening model, or field calibration. Example:
+
+```powershell
+python tools/generate_trajectory_map.py --output work/trajectory_map.csv
+```
+
+The CSV contains distance, radial velocity, launch angle, pivot output rotations, wheel RPS, time of flight, and robustness margin. The defaults are based on Eclipse's current release height, 4-inch wheel, 75% transfer efficiency, 1.5–5.0 m score range, and ±3 m/s radial velocity. Re-run it after field calibration and use the CSV to replace the one-dimensional score tables with a two-dimensional lookup.
+
 ## Appendix D: CAN ID Map
 
 | ID | Device | Bus |
