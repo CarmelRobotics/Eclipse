@@ -142,6 +142,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-speed", type=float, default=20.0)
     parser.add_argument("--speed-step", type=float, default=0.1)
     parser.add_argument("--wheel-efficiency", type=float, default=0.75)
+    parser.add_argument("--wheel-speed-scale", type=float, default=1.30,
+                        help="field calibration multiplier applied to computed wheel RPS")
+    parser.add_argument("--pivot-offset", type=float, default=0.018,
+                        help="field calibration offset in pivot output rotations")
     parser.add_argument("--wheel-diameter", type=float, default=0.1016,
                         help="m; Eclipse's current 4-inch flywheel")
     return parser.parse_args()
@@ -181,9 +185,10 @@ def main() -> None:
                 "launch_angle_deg": result.angle_deg,
                 # Eclipse's calibrated mechanism maps launch angle to pivot
                 # output rotations: 70 degrees at stow, flatter as pivot rises.
-                "pivot_output_rotations": (70.0 - result.angle_deg) / 360.0,
+                "pivot_output_rotations": (70.0 - result.angle_deg) / 360.0 + args.pivot_offset,
                 "ball_speed_mps": result.ball_speed_mps,
-                "wheel_rps": result.ball_speed_mps / (args.wheel_efficiency * circumference),
+                "wheel_rps": args.wheel_speed_scale * result.ball_speed_mps
+                    / (args.wheel_efficiency * circumference),
                 "tof_s": result.tof_s,
                 "robust_margin_m": result.margin_m,
             })

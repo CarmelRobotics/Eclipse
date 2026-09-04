@@ -751,6 +751,7 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 |---|---|---|
 | `ShotTuning/HeadingOffsetDeg` | 0 | Mechanical aim trim (1° steps; applies to hub and pass bearing) |
 | `ShotTuning/MoveCompGain` | 0.7 | Shoot-on-the-move velocity lead scale (0 = aim as if stationary) |
+| `FeatureFlags/TrajectoryMap` | false | Enable generated distance + radial-velocity shot map; false uses calibrated 1D tables |
 | `ShotTuning/ImpactCompGain` | 1.0 | Acceleration lead scale after a detected drivetrain disturbance |
 | `ShotTuning/ImpactJerkThreshold` | 100.0 m/s³ | Pigeon jerk that arms impact compensation |
 | `ShotTuning/ImpactCompDuration` | 0.30 s | Duration of the transient impact compensation window |
@@ -783,7 +784,7 @@ The cached shot solution now transforms the calibrated 3D trajectory through the
 python tools/generate_trajectory_map.py --output work/trajectory_map.csv
 ```
 
-The CSV contains distance, radial velocity, launch angle, pivot output rotations, wheel RPS, time of flight, and robustness margin. The defaults are based on Eclipse's current release height, 4-inch wheel, 75% transfer efficiency, 1.5–5.0 m score range, and ±3 m/s radial velocity. Re-run it after field calibration and use the CSV to replace the one-dimensional score tables with a two-dimensional lookup.
+The CSV contains distance, radial velocity, launch angle, pivot output rotations, wheel RPS, time of flight, and robustness margin. The defaults are based on Eclipse's current release height, 4-inch wheel, 75% transfer efficiency, 1.5–5.0 m score range, and ±3 m/s radial velocity. The generated CSV is deployed as `src/main/deploy/trajectory-map.csv`; `TrajectoryMap` bilinearly interpolates it at runtime when `FeatureFlags/TrajectoryMap` is enabled. The flag defaults to false so the existing field-calibrated one-dimensional tables remain the safe baseline until the map is validated on the robot.
 
 ## Appendix D: CAN ID Map
 

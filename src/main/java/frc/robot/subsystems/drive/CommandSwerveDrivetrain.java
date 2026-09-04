@@ -104,6 +104,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         new LoggedTunableNumber("ShotTuning/TiltPivotGain", 1.0);
     private Translation2d m_shotVector = new Translation2d(1, 0);
     private double m_shotTofSeconds = 0.5;
+    private double m_shotRadialVelocityMetersPerSecond = 0.0;
     private double m_tiltPivotCorrectionRotations = 0.0;
     private Translation2d m_filteredFieldVelocity = new Translation2d();
     private Translation2d m_previousPigeonAcceleration = new Translation2d();
@@ -819,6 +820,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
         m_shotVector = shotVector;
         m_shotTofSeconds = tof;
+        m_shotRadialVelocityMetersPerSecond = speeds.vxMetersPerSecond
+            * robotToHub.getX() / Math.max(0.001, robotToHub.getNorm())
+            + speeds.vyMetersPerSecond
+            * robotToHub.getY() / Math.max(0.001, robotToHub.getNorm());
 
         // Apply tilt after the horizontal moving-shot solve. The table's nominal pivot
         // angle supplies the calibrated world launch angle; rotating that 3D trajectory
@@ -847,8 +852,22 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 untiltedTarget.getZ(), Math.hypot(untiltedTarget.getX(), untiltedTarget.getY())));
             m_tiltPivotCorrectionRotations = -m_tiltPivotGain.get()
                 * (correctedLaunchAngleDeg - nominalLaunchAngleDeg) / 360.0;
+        }
+
+        // Use the generated 2D map after tilt has finalized the effective shot distance.
+        // If the map is missing or does not cover a cell, retain the calibrated 1D fallback.
+        var trajectorySolution = FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
+            ? frc.robot.subsystems.shooter.TrajectoryMap.lookup(
+                m_shotVector.getNorm(), m_shotRadialVelocityMetersPerSecond)
+            : java.util.Optional.<frc.robot.subsystems.shooter.TrajectoryMap.Solution>empty();
+        if (trajectorySolution.isPresent()) {
+            m_shotTofSeconds = trajectorySolution.get().tofSeconds();
+            SmartDashboard.putNumber("aim/trajectory robustness margin",
+                trajectorySolution.get().robustnessMarginMeters());
+        } else {
             m_shotTofSeconds = Math.max(0.001,
                 ShooterConstants.getShotTimeOfFlightSeconds(m_shotVector.getNorm()) + tofOffset);
+            SmartDashboard.putNumber("aim/trajectory robustness margin", 0.0);
         }
 
         SmartDashboard.putNumber("aim/pitch deg", getPigeon2().getPitch().getValueAsDouble());
@@ -857,10 +876,15 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SmartDashboard.putNumber("aim/impact acceleration", m_impactAcceleration.getNorm());
         SmartDashboard.putNumber("aim/impact jerk", m_impactJerk);
         SmartDashboard.putNumber("aim/impact compensation remaining", m_impactCompensationRemaining);
+        SmartDashboard.putNumber("aim/radial velocity", m_shotRadialVelocityMetersPerSecond);
     }
 
     public double getShotTimeOfFlightSeconds() {
         return m_shotTofSeconds;
+    }
+
+    public double getShotRadialVelocityMetersPerSecond() {
+        return m_shotRadialVelocityMetersPerSecond;
     }
 
     /** Returns the calibrated score pivot position corrected for current robot tilt. */

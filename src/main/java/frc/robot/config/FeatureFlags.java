@@ -27,6 +27,9 @@ public final class FeatureFlags {
   /** Motion-compensate the aim. Off = aim at the hub as if the robot were stationary. */
   public static final BooleanSupplier SHOOT_ON_THE_MOVE = FeatureFlag.of("ShootOnTheMove", true);
 
+  /** Use the generated distance + radial-velocity trajectory map. Off keeps calibrated 1D tables. */
+  public static final BooleanSupplier TRAJECTORY_MAP = FeatureFlag.of("TrajectoryMap", false);
+
   /** Compensate the shot vector and pivot for Pigeon pitch/roll. */
   public static final BooleanSupplier TILT_COMPENSATION = FeatureFlag.of("TiltCompensation", true);
 

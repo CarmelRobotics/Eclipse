@@ -453,9 +453,18 @@ public class Shooter extends SubsystemBase {
         // we interpolate the shot table to get the pivot and RPS for that distance, then
         // add the live offsets so the driver can trim without redeploying.
         double shotDistance = m_drive.getShotDistance();
-        m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(
-            ShooterConstants.getScorePivotPosition(shotDistance)) + m_pivotOffset.get();
-        m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
+        var trajectorySolution = FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
+            ? TrajectoryMap.lookup(shotDistance, m_drive.getShotRadialVelocityMetersPerSecond())
+            : java.util.Optional.<TrajectoryMap.Solution>empty();
+        double nominalPivot = trajectorySolution
+            .map(TrajectoryMap.Solution::pivotOutputRotations)
+            .orElseGet(() -> ShooterConstants.getScorePivotPosition(shotDistance));
+        double nominalRps = trajectorySolution
+            .map(TrajectoryMap.Solution::wheelRps)
+            .orElseGet(() -> ShooterConstants.getScoreShooterRps(shotDistance));
+        m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(nominalPivot)
+            + m_pivotOffset.get();
+        m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
         m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
 
         // === Live flywheel gain re-tuning ===
@@ -484,6 +493,7 @@ public class Shooter extends SubsystemBase {
         SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
         SmartDashboard.putNumber("interpolated pivot position", m_targetPivotPosition);
         SmartDashboard.putNumber("interpolated shooter rps", m_targetShooterRps);
+        SmartDashboard.putBoolean("shot trajectory map active", trajectorySolution.isPresent());
         SmartDashboard.putBoolean("ready to shoot", ready);
 
         // === Pivot position control ===
