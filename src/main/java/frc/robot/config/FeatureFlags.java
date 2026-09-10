@@ -30,6 +30,9 @@ public final class FeatureFlags {
   /** Use the generated distance + radial-velocity trajectory map. Off keeps calibrated 1D tables. */
   public static final BooleanSupplier TRAJECTORY_MAP = FeatureFlag.of("TrajectoryMap", false);
 
+  /** Use the centralized field-zone decision for context-aware shooting. */
+  public static final BooleanSupplier ZONE_CONTROLLER = FeatureFlag.of("ZoneController", true);
+
   /** Compensate the shot vector and pivot for Pigeon pitch/roll. */
   public static final BooleanSupplier TILT_COMPENSATION = FeatureFlag.of("TiltCompensation", true);
 

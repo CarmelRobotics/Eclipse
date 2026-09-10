@@ -163,9 +163,21 @@ public class Shooter extends SubsystemBase {
 
     private final LoggedTunableNumber m_shotDipRps = new LoggedTunableNumber("ShotTuning/ShotDipRps", 5.0);
     private final LoggedTunableNumber m_shotRecoverRps = new LoggedTunableNumber("ShotTuning/ShotRecoverRps", 2.0);
+    private final LoggedTunableNumber m_noShotRecoveryTimeout =
+        new LoggedTunableNumber("ShotTuning/NoShotRecoveryTimeout", 1.0);
+    private final LoggedTunableNumber m_jamReverseDuration =
+        new LoggedTunableNumber("ShotTuning/JamReverseDuration", 0.18);
+    private final LoggedTunableNumber m_maxRecoveryAttempts =
+        new LoggedTunableNumber("ShotTuning/MaxRecoveryAttempts", 2.0);
     private int m_shotCount = 0;
     private boolean m_shotArmed = false;   // wheel has reached target velocity at least once; ready to detect dips
     private boolean m_inDip = false;       // currently experiencing a dip (ball in flight or stuck)
+
+    private enum FeedRecoveryPhase { IDLE, FEEDING, REVERSING, FAULT }
+    private FeedRecoveryPhase m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
+    private double m_feedRecoveryPhaseStart = 0.0;
+    private int m_feedRecoveryBaselineShotCount = 0;
+    private int m_feedRecoveryAttempts = 0;
 
     private final CommandSwerveDrivetrain m_drive;
 
@@ -291,6 +303,68 @@ public class Shooter extends SubsystemBase {
             },
             this
         );
+    }
+
+    /** Feeds continuously and automatically reverses the indexer if no shot is detected. */
+    public Command feedWithRecoveryCommand() {
+        return Commands.runEnd(
+            this::runFeedWithRecovery,
+            this::stopFeedWithRecovery,
+            this
+        );
+    }
+
+    private void runFeedWithRecovery() {
+        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        if (m_feedRecoveryPhase == FeedRecoveryPhase.IDLE) {
+            m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
+            m_feedRecoveryPhaseStart = now;
+            m_feedRecoveryBaselineShotCount = m_shotCount;
+            m_feedRecoveryAttempts = 0;
+        }
+
+        switch (m_feedRecoveryPhase) {
+            case FEEDING -> {
+                setState(IndexerState.SCORE);
+                if (m_shotCount > m_feedRecoveryBaselineShotCount) {
+                    // A real shot proves the feed path is moving. Start a fresh
+                    // no-shot window and forget prior recovery attempts.
+                    m_feedRecoveryBaselineShotCount = m_shotCount;
+                    m_feedRecoveryPhaseStart = now;
+                    m_feedRecoveryAttempts = 0;
+                } else if (now - m_feedRecoveryPhaseStart >= m_noShotRecoveryTimeout.get()) {
+                    if (m_feedRecoveryAttempts >= Math.round(m_maxRecoveryAttempts.get())) {
+                        m_feedRecoveryPhase = FeedRecoveryPhase.FAULT;
+                        setState(IndexerState.ZERO);
+                        SmartDashboard.putString("shooter/feed recovery", "FAULT - clear jam");
+                    } else {
+                        m_feedRecoveryAttempts++;
+                        m_feedRecoveryPhase = FeedRecoveryPhase.REVERSING;
+                        m_feedRecoveryPhaseStart = now;
+                        SmartDashboard.putString("shooter/feed recovery", "REVERSING");
+                    }
+                }
+            }
+            case REVERSING -> {
+                setState(IndexerState.REVERSE);
+                if (now - m_feedRecoveryPhaseStart >= m_jamReverseDuration.get()) {
+                    m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
+                    m_feedRecoveryPhaseStart = now;
+                    m_feedRecoveryBaselineShotCount = m_shotCount;
+                    SmartDashboard.putString("shooter/feed recovery", "RETRYING");
+                }
+            }
+            case FAULT -> setState(IndexerState.ZERO);
+            case IDLE -> { /* initialized above */ }
+        }
+        SmartDashboard.putString("shooter/feed recovery phase", m_feedRecoveryPhase.toString());
+        SmartDashboard.putNumber("shooter/feed recovery attempts", m_feedRecoveryAttempts);
+    }
+
+    private void stopFeedWithRecovery() {
+        setState(IndexerState.ZERO);
+        m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
+        m_feedRecoveryAttempts = 0;
     }
 
     // === Active self-test (pit motor test) ===

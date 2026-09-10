@@ -756,6 +756,9 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 | `ShotTuning/ImpactJerkThreshold` | 100.0 m/s³ | Pigeon jerk that arms impact compensation |
 | `ShotTuning/ImpactCompDuration` | 0.30 s | Duration of the transient impact compensation window |
 | `ShotTuning/TiltPivotGain` | 1.0 | Scale for the tilt-derived pivot correction |
+| `ShotTuning/NoShotRecoveryTimeout` | 1.0 s | Time feeding without a detected shot before indexer recovery |
+| `ShotTuning/JamReverseDuration` | 0.18 s | Duration of each automatic indexer reverse pulse |
+| `ShotTuning/MaxRecoveryAttempts` | 2 | Reverse/retry attempts before declaring a feed fault |
 | `ShotTuning/ShootingSpeedScale` | 0.45 | Translation cap while aiming |
 | `ShotTuning/PivotOffset` | 0 | Shifts entire hub pivot table |
 | `ShotTuning/ShooterRpsOffset` | 0 | Shifts entire hub RPS table |
@@ -775,6 +778,10 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 ### Tilt and impact compensation (added)
 
 The cached shot solution now transforms the calibrated 3D trajectory through the inverse Pigeon pitch/roll. Its horizontal projection updates aim bearing and distance, while the elevation change produces a pivot correction. `ShotTuning/TiltPivotGain` defaults to 1.0. The Pigeon X/Y acceleration is filtered and differentiated into jerk; a sharp jerk event arms a short-lived window, while filtered drivetrain acceleration supplies the `1/2*a*t^2` lead so a hit while aiming is accounted for during ball flight. Tune `ShotTuning/ImpactJerkThreshold`, `ShotTuning/ImpactCompGain`, and `ShotTuning/ImpactCompDuration` from logs. Both behaviors can be disabled through `FeatureFlags/TiltCompensation` and `FeatureFlags/ImpactCompensation` and should be validated with low-speed bump tests before match use.
+
+### Automatic feed recovery and zone controller
+
+All shot and pass feed commands now use a small feed-recovery state machine. If no velocity-dip shot is detected for `ShotTuning/NoShotRecoveryTimeout`, the indexer reverses for `ShotTuning/JamReverseDuration` and retries. After `ShotTuning/MaxRecoveryAttempts`, feeding stops and the dashboard reports a fault for manual clearing. `ZoneController` classifies the robot as alliance, bump, trench, neutral, or opponent-side and publishes the selected default action under `zone/*`; the right-trigger hub/pass decision uses it when `FeatureFlags/ZoneController` is enabled.
 
 ### Offline trajectory-map generator
 
