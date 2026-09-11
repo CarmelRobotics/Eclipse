@@ -7,10 +7,15 @@ import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 
+import java.util.function.BooleanSupplier;
+
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.config.FeatureFlags;
+import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
 import frc.robot.util.LoggedTunableNumber;
@@ -20,7 +25,16 @@ public class Lintake extends SubsystemBase {
     private final TalonFX m_followerPinionMotor = new TalonFX(LintakeConstants.kFollowerPinionMotorId);
     private final TalonFX m_rollerMotor = new TalonFX(LintakeConstants.kRollerMotorId);
 
-    private final MotionMagicVoltage m_positionRequest = new MotionMagicVoltage(0);
+    // Separate request objects make it explicit that both Talons retain independent onboard
+    // position loops. They are given slightly different targets by the soft synchronizer below.
+    private final MotionMagicVoltage m_leaderPositionRequest = new MotionMagicVoltage(0);
+    private final MotionMagicVoltage m_followerPositionRequest = new MotionMagicVoltage(0);
+    private final BooleanSupplier m_impactActive;
+
+    // A blend of zero means the motors are fully decoupled; one means soft synchronization is
+    // fully active. It is deliberately ramped back in after an impact so the linkage is not
+    // shocked by an immediate correction.
+    private double m_syncBlend = 1.0;
 
     private PinionState m_pinionState = PinionState.STOW;
     private RollerState m_rollerState = RollerState.ZERO;
@@ -40,8 +54,25 @@ public class Lintake extends SubsystemBase {
         new LoggedTunableNumber("LintakeTuning/PinionCruiseRps", 55);
     private final LoggedTunableNumber m_pinionAccel =
         new LoggedTunableNumber("LintakeTuning/PinionAccelRps2", 135);
+    private final LoggedTunableNumber m_pinionSyncKp =
+        new LoggedTunableNumber("LintakeTuning/PinionSyncKp", 0.12);
+    private final LoggedTunableNumber m_pinionSyncDeadband =
+        new LoggedTunableNumber("LintakeTuning/PinionSyncDeadbandRot", 0.15);
+    private final LoggedTunableNumber m_pinionSyncMaxCorrection =
+        new LoggedTunableNumber("LintakeTuning/PinionSyncMaxCorrectionRot", 0.75);
+    private final LoggedTunableNumber m_pinionSyncRecovery =
+        new LoggedTunableNumber("LintakeTuning/PinionSyncRecoverySec", 0.40);
 
     public Lintake() {
+        this(() -> false);
+    }
+
+    public Lintake(CommandSwerveDrivetrain drivetrain) {
+        this(drivetrain::isImpactCompensationActive);
+    }
+
+    private Lintake(BooleanSupplier impactActive) {
+        m_impactActive = impactActive;
         m_followerPinionMotor.setPosition(0);
         m_leaderPinionMotor.setPosition(0);
 
@@ -158,22 +189,52 @@ public class Lintake extends SubsystemBase {
 
         m_rollerMotor.setVoltage(m_rollerState.volts);
 
-        // Compliance is handled by the pinion stator current limit (see
-        // LintakeConstants.kPinionCurrentLimits), not by gains -- so a single stiff
-        // slot 0 drives every state and the intake still back-drives when it hits a wall.
-        m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
-        m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
+        double leaderPosition = m_leaderPinionMotor.getPosition().getValueAsDouble();
+        double followerPosition = m_followerPinionMotor.getPosition().getValueAsDouble();
+        double pinionSkew = leaderPosition - followerPosition;
+
+        boolean impactActive = m_impactActive.getAsBoolean();
+        if (impactActive) {
+            // Let each motor hold its own position through the hit. A synchronization term
+            // would make the motor on the struck side immediately fight the other side.
+            m_syncBlend = 0.0;
+        } else {
+            double recoverySeconds = Math.max(0.02, m_pinionSyncRecovery.get());
+            m_syncBlend = Math.min(1.0, m_syncBlend + 0.02 / recoverySeconds);
+        }
+
+        double syncCorrection = 0.0;
+        if (FeatureFlags.LINTAKE_SOFT_SYNC.getAsBoolean()) {
+            double outsideDeadband = Math.max(0.0,
+                Math.abs(pinionSkew) - Math.max(0.0, m_pinionSyncDeadband.get()));
+            syncCorrection = Math.copySign(
+                MathUtil.clamp(m_pinionSyncKp.get() * outsideDeadband,
+                    0.0, Math.max(0.0, m_pinionSyncMaxCorrection.get())),
+                pinionSkew);
+            syncCorrection *= m_syncBlend;
+        }
+
+        // If the leader is ahead (more negative with the current calibration), this shifts its
+        // target back and advances the follower target. The same formula works in either travel
+        // direction because the correction is based on signed encoder positions.
+        double leaderTarget = m_pinionState.position - syncCorrection;
+        double followerTarget = m_pinionState.position + syncCorrection;
+        m_leaderPinionMotor.setControl(m_leaderPositionRequest.withPosition(leaderTarget));
+        m_followerPinionMotor.setControl(m_followerPositionRequest.withPosition(followerTarget));
 
         SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
         SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
         SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
-        double leaderPos = m_leaderPinionMotor.getPosition().getValueAsDouble();
-        SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, leaderPos);
-        SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
+        SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, leaderPosition);
+        SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, followerPosition);
+        SmartDashboard.putNumber("LintakeTuning/PinionSkewRot", pinionSkew);
+        SmartDashboard.putNumber("LintakeTuning/PinionSyncCorrectionRot", syncCorrection);
+        SmartDashboard.putNumber("LintakeTuning/PinionSyncBlend", m_syncBlend);
+        SmartDashboard.putBoolean("LintakeTuning/PinionImpactDecoupled", impactActive);
         // The signal you tune against: target minus actual (motor rotations). Watch this while
         // editing the knobs -- want it to reach ~0 quickly with no overshoot and no ringing.
-        SmartDashboard.putNumber("LintakeTuning/PinionErrorRot", m_pinionState.position - leaderPos);
+        SmartDashboard.putNumber("LintakeTuning/PinionErrorRot", m_pinionState.position - leaderPosition);
     }
     
 }

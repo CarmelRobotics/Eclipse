@@ -43,7 +43,7 @@ import frc.robot.subsystems.strategy.ZoneController;
 
 public class RobotContainer {
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
-  private final Lintake m_lintake = new Lintake();
+  private final Lintake m_lintake = new Lintake(m_drivetrain);
   private final Shooter m_shooter = new Shooter(m_drivetrain);
   private final ZoneController m_zoneController = new ZoneController(m_drivetrain);
   private final SystemsCheck m_systemsCheck = new SystemsCheck(m_drivetrain, m_shooter, m_lintake);

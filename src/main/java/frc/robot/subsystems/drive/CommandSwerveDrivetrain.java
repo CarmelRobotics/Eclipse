@@ -883,6 +883,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return m_shotTofSeconds;
     }
 
+    /** True for the short window after the Pigeon detects a collision. */
+    public boolean isImpactCompensationActive() {
+        return FeatureFlags.IMPACT_COMPENSATION.getAsBoolean()
+            && m_impactCompensationRemaining > 0.0;
+    }
+
     public double getShotRadialVelocityMetersPerSecond() {
         return m_shotRadialVelocityMetersPerSecond;
     }

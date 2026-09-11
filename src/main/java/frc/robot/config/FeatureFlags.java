@@ -39,6 +39,9 @@ public final class FeatureFlags {
   /** Add a short acceleration lead after a sudden drivetrain disturbance/impact. */
   public static final BooleanSupplier IMPACT_COMPENSATION = FeatureFlag.of("ImpactCompensation", true);
 
+  /** Keep the two mechanically loose lintake pinions aligned without hard-following either side. */
+  public static final BooleanSupplier LINTAKE_SOFT_SYNC = FeatureFlag.of("LintakeSoftSync", true);
+
   /** Require our hub to be SHIFTS-active for a hub shot. Off = the range/zone decide alone. */
   public static final BooleanSupplier SHIFTS_GATE = FeatureFlag.of("ShiftsGate", true);
 
