@@ -204,7 +204,13 @@ public class Lintake extends SubsystemBase {
         }
 
         double syncCorrection = 0.0;
-        if (FeatureFlags.LINTAKE_SOFT_SYNC.getAsBoolean()) {
+        // Never offset endpoint targets. If one side reaches the mechanical stop first,
+        // applying a correction here would intentionally command that side back off the stop,
+        // which can make GROUND retract a little and settle short. Both motors should press
+        // toward the exact endpoint target; soft synchronization is for travel between stops.
+        boolean endpointHold = m_pinionState == PinionState.STOW
+            || m_pinionState == PinionState.GROUND;
+        if (FeatureFlags.LINTAKE_SOFT_SYNC.getAsBoolean() && !endpointHold) {
             double outsideDeadband = Math.max(0.0,
                 Math.abs(pinionSkew) - Math.max(0.0, m_pinionSyncDeadband.get()));
             syncCorrection = Math.copySign(
@@ -232,6 +238,7 @@ public class Lintake extends SubsystemBase {
         SmartDashboard.putNumber("LintakeTuning/PinionSyncCorrectionRot", syncCorrection);
         SmartDashboard.putNumber("LintakeTuning/PinionSyncBlend", m_syncBlend);
         SmartDashboard.putBoolean("LintakeTuning/PinionImpactDecoupled", impactActive);
+        SmartDashboard.putBoolean("LintakeTuning/PinionEndpointHold", endpointHold);
         // The signal you tune against: target minus actual (motor rotations). Watch this while
         // editing the knobs -- want it to reach ~0 quickly with no overshoot and no ringing.
         SmartDashboard.putNumber("LintakeTuning/PinionErrorRot", m_pinionState.position - leaderPosition);
