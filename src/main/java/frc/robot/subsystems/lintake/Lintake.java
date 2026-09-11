@@ -62,6 +62,8 @@ public class Lintake extends SubsystemBase {
         new LoggedTunableNumber("LintakeTuning/PinionSyncMaxCorrectionRot", 0.75);
     private final LoggedTunableNumber m_pinionSyncRecovery =
         new LoggedTunableNumber("LintakeTuning/PinionSyncRecoverySec", 0.40);
+    private final LoggedTunableNumber m_groundHoldBias =
+        new LoggedTunableNumber("LintakeTuning/GroundHoldBiasRot", 0.20);
 
     public Lintake() {
         this(() -> false);
@@ -203,13 +205,20 @@ public class Lintake extends SubsystemBase {
             m_syncBlend = Math.min(1.0, m_syncBlend + 0.02 / recoverySeconds);
         }
 
+        // GROUND is intentionally biased a little past the nominal calibration point. The
+        // physical hard stop prevents further travel, leaving the position loop with enough
+        // error to keep pressure on the stop instead of balancing a little short under load.
+        // Tune this down immediately if the mechanism does not have a positive hard stop.
+        boolean endpointHold = m_pinionState == PinionState.STOW
+            || m_pinionState == PinionState.GROUND;
+        double effectiveTarget = m_pinionState.position
+            - (m_pinionState == PinionState.GROUND ? Math.max(0.0, m_groundHoldBias.get()) : 0.0);
+
         double syncCorrection = 0.0;
         // Never offset endpoint targets. If one side reaches the mechanical stop first,
         // applying a correction here would intentionally command that side back off the stop,
         // which can make GROUND retract a little and settle short. Both motors should press
         // toward the exact endpoint target; soft synchronization is for travel between stops.
-        boolean endpointHold = m_pinionState == PinionState.STOW
-            || m_pinionState == PinionState.GROUND;
         if (FeatureFlags.LINTAKE_SOFT_SYNC.getAsBoolean() && !endpointHold) {
             double outsideDeadband = Math.max(0.0,
                 Math.abs(pinionSkew) - Math.max(0.0, m_pinionSyncDeadband.get()));
@@ -223,8 +232,8 @@ public class Lintake extends SubsystemBase {
         // If the leader is ahead (more negative with the current calibration), this shifts its
         // target back and advances the follower target. The same formula works in either travel
         // direction because the correction is based on signed encoder positions.
-        double leaderTarget = m_pinionState.position - syncCorrection;
-        double followerTarget = m_pinionState.position + syncCorrection;
+        double leaderTarget = effectiveTarget - syncCorrection;
+        double followerTarget = effectiveTarget + syncCorrection;
         m_leaderPinionMotor.setControl(m_leaderPositionRequest.withPosition(leaderTarget));
         m_followerPinionMotor.setControl(m_followerPositionRequest.withPosition(followerTarget));
 
@@ -232,6 +241,7 @@ public class Lintake extends SubsystemBase {
         SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
         SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
         SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
+        SmartDashboard.putNumber("LintakeTuning/PinionEffectiveTargetRot", effectiveTarget);
         SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, leaderPosition);
         SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, followerPosition);
         SmartDashboard.putNumber("LintakeTuning/PinionSkewRot", pinionSkew);
