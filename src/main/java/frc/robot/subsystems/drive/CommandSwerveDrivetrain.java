@@ -844,7 +844,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             Rotation3d tilt = new Rotation3d(
                 Math.toRadians(getPigeon2().getRoll().getValueAsDouble()),
                 Math.toRadians(getPigeon2().getPitch().getValueAsDouble()), 0);
-            Translation3d untiltedTarget = targetVector.rotateBy(tilt.inverse());
+            Translation3d untiltedTarget = targetVector.rotateBy(tilt.unaryMinus());
 
             m_shotVector = new Translation2d(untiltedTarget.getX(), untiltedTarget.getY())
                 .rotateBy(getState().Pose.getRotation());

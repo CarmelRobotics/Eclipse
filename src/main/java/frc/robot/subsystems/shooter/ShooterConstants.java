@@ -45,6 +45,8 @@ public final class ShooterConstants {
     public static final double kPassHeadingToleranceDegrees = 10.0;
     // Passes command up to ~60 RPS; spin-up from idle takes longer than a hub shot's.
     public static final double kPassSpinupTimeoutSeconds = 2.0;
+    // Manual SEND ferry runs the flywheel at 90 RPS and needs more time than a hub shot to spin up.
+    public static final double kFerrySpinupTimeoutSeconds = 2.0;
     public static final String kPassRpsOffsetKey = "ShotTuning/PassRpsOffset";
 
     // ===== Shooter fixed states =====

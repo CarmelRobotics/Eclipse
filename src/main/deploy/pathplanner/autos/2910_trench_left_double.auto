@@ -47,13 +47,13 @@
               {
                 "type": "named",
                 "data": {
-                  "name": "dump"
+                    "name": "shoot"
                 }
               },
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 4.0
+                  "waitTime": 3.0
                 }
               }
             ]
@@ -84,13 +84,13 @@
               {
                 "type": "named",
                 "data": {
-                  "name": "dump"
+                    "name": "shoot"
                 }
               },
               {
                 "type": "wait",
                 "data": {
-                  "waitTime": 4.0
+                  "waitTime": 3.0
                 }
               }
             ]

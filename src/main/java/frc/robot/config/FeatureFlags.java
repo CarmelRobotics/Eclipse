@@ -57,7 +57,7 @@ public final class FeatureFlags {
       FeatureFlag.of("IndexerVelocityControl", true);
 
   /** Trench/tower driver assists. Off = fully manual driving everywhere. */
-  public static final BooleanSupplier DRIVER_ASSISTS = FeatureFlag.of("DriverAssists", true);
+  public static final BooleanSupplier DRIVER_ASSISTS = FeatureFlag.of("DriverAssists", false);
 
   /** Dynamic current budgeting. Off = the static compiled current limits (IDLE mode). Starts
    *  OFF: it re-allocates current limits at runtime and hasn't been field-validated -- flip it

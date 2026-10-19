@@ -42,6 +42,11 @@ import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 import frc.robot.subsystems.strategy.ZoneController;
 
 public class RobotContainer {
+  // Driver assists stay off for competition. This is intentionally a compile-time gate rather
+  // than only a dashboard feature flag, so a stale SmartDashboard value cannot re-enable trench
+  // or tower steering after a reboot.
+  private static final boolean kCompetitionDriverAssists = false;
+
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
   private final Lintake m_lintake = new Lintake(m_drivetrain);
   private final Shooter m_shooter = new Shooter(m_drivetrain);
@@ -187,7 +192,8 @@ public class RobotContainer {
     Trigger assistActive = new Trigger(() -> currentAssistZone() != AssistZone.NONE)
         .and(aimHeld.negate())
         .and(m_controller.x().negate())
-        .and(FeatureFlags.DRIVER_ASSISTS);  // field kill switch for the assists
+        .and(FeatureFlags.DRIVER_ASSISTS)
+        .and(() -> kCompetitionDriverAssists);
 
     assistActive.whileTrue(m_drivetrain.applyRequest(this::assistDriveRequest));
     assistActive.onFalse(Commands.runOnce(() -> m_assistLockHeading = null));
@@ -276,7 +282,7 @@ public class RobotContainer {
     );
     // Manual flat-out ferry kept as a fallback (fixed 90 RPS, no aim assist).
     m_controller.povRight().whileTrue(
-        heldShotCommand(PivotState.LOB, ShooterState.SEND)
+        heldFerryCommand()
     );
 
     // Clear jam: reverse flywheel and indexer to back out a stuck ball.
@@ -464,6 +470,20 @@ public class RobotContainer {
         Commands.sequence(
             prepareShotCommand(pivotState, shooterState),
             Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
+            m_shooter.feedWithRecoveryCommand()
+        ),
+        lintakePumpCommand()
+    ).finallyDo(interrupted -> stopShooter());
+  }
+
+  // Manual flat-out ferry. This has its own readiness gate because readyToShoot() checks the
+  // distance-interpolated SCORE target, which can never match the fixed SEND state at 90 RPS.
+  private Command heldFerryCommand() {
+    return Commands.deadline(
+        Commands.sequence(
+            prepareShotCommand(PivotState.LOB, ShooterState.SEND),
+            Commands.waitUntil(m_shooter::readyToFerry)
+                .withTimeout(ShooterConstants.kFerrySpinupTimeoutSeconds),
             m_shooter.feedWithRecoveryCommand()
         ),
         lintakePumpCommand()

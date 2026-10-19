@@ -520,6 +520,28 @@ public class Shooter extends SubsystemBase {
         return spunUp && pivotReady && aimed;
     }
 
+    // Manual POV-right ferry uses the fixed SEND state rather than the distance-interpolated
+    // SCORE/PASS targets. Do not reuse readyToShoot(): its SCORE target can never be satisfied
+    // while SEND is commanding 90 RPS, which made the old manual ferry always wait for timeout.
+    public boolean readyToFerry() {
+        boolean spunUp = Math.abs(
+            m_leftLeaderShooterMotor.getVelocity().getValueAsDouble()
+                - ShooterConstants.kSendShooterRps)
+            <= ShooterConstants.kShooterReadyToleranceRps;
+        double currentPivotOutputRot =
+            m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        boolean pivotReady = Math.abs(
+            currentPivotOutputRot - ShooterConstants.kLobPivotPosition)
+            <= ShooterConstants.kPivotReadyToleranceRotations;
+
+        SmartDashboard.putBoolean("ready/ferry spun up", spunUp);
+        SmartDashboard.putBoolean("ready/ferry pivot", pivotReady);
+        DogLog.log("Shooter/Ready/FerrySpunUp", spunUp);
+        DogLog.log("Shooter/Ready/FerryPivot", pivotReady);
+
+        return spunUp && pivotReady;
+    }
+
     @Override
     public void periodic() {
         // === Update shot targets from drivetrain compensation ===
