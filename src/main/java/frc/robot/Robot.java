@@ -4,13 +4,12 @@
 
 package frc.robot;
 
-import dev.doglog.DogLog;
-import dev.doglog.DogLogOptions;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.util.LoggedTunableNumber;
+import frc.robot.util.RobotLogger;
 
 public class Robot extends TimedRobot {
   private Command m_autonomousCommand;
@@ -18,11 +17,9 @@ public class Robot extends TimedRobot {
   private final RobotContainer m_robotContainer;
 
   public Robot() {
-    // DogLog writes all logged signals to a WPILOG file (open later in AdvantageScope)
-    // and mirrors them live to NetworkTables. captureDs also records joystick/DS data.
-    // Set ntPublish(false) for competition if NT bandwidth becomes a concern.
-    DogLog.setOptions(new DogLogOptions().withNtPublish(true).withCaptureDs(true));
-    DogLog.setEnabled(true);
+    // Keep only low-rate, explicitly selected WPILib data-log entries. NetworkTables and
+    // console mirroring are disabled to avoid logging pressure during competition.
+    RobotLogger.start();
 
     // Dashboard tunables (ShotTuning/*) are live. Set false for competition so a stray
     // dashboard edit can't change gains or offsets mid-match.
@@ -42,12 +39,13 @@ public class Robot extends TimedRobot {
 
   @Override
   public void robotPeriodic() {
+    RobotLogger.periodic();
     CommandScheduler.getInstance().run();
 
-    // Battery health in every log: if shots start missing low or the robot stutters,
-    // check these traces first -- sag is invisible on the dashboard after the fact.
-    DogLog.log("Battery/Voltage", RobotController.getBatteryVoltage());
-    DogLog.log("Battery/BrownedOut", RobotController.isBrownedOut());
+    if (RobotLogger.shouldLogPeriodic()) {
+      RobotLogger.log("Battery/Voltage", RobotController.getBatteryVoltage());
+      RobotLogger.log("Battery/BrownedOut", RobotController.isBrownedOut());
+    }
   }
 
   @Override

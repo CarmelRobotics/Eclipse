@@ -2,7 +2,7 @@
 
 **FRC Team 2035 — 2026 Season (*REBUILT*)**
 Repository: `CarmelRobotics/Eclipse`, branch `summer` · Java 17, WPILib 2026 command-based, GradleRIO
-Major dependencies: CTRE Phoenix 6 (26.1.0), PathPlanner (2026.1.2), DogLog (2026.5.0)
+Major dependencies: CTRE Phoenix 6 (26.1.0), PathPlanner (2026.1.2), WPILib DataLog
 Last updated: 2026-07-06 (post field-calibration session of 2026-07-04; before second field session)
 
 ---
@@ -603,13 +603,13 @@ Per-motor results land under `SystemsCheck/{Shooter,Lintake,Drive}/…`, with pe
 
 ## 13. Telemetry and Tuning Infrastructure
 
-### 13.1 DogLog
+### 13.1 WPILib DataLog
 
-Initialized in the `Robot` constructor: WPILOG file output, live NetworkTables mirroring (`ntPublish`), and DS/joystick capture. The always-on channel set:
+Initialized in `Robot` through `RobotLogger`: WPILib's binary WPILOG file output with NetworkTables and console mirroring disabled. The logger keeps only low-rate, explicitly selected diagnostics to avoid high-frequency allocation and queue pressure:
 
-- **Per-loop shooter suite**: shot distance, hub heading error, target/actual pivot, target/commanded/actual RPS, RPS error, all readiness gates (hub and pass), average flywheel current, indexer current and volts, all three state enums, shot count, ball-in-flywheel.
-- **Battery**: `Battery/Voltage` and `Battery/BrownedOut` every loop from `robotPeriodic` — sag is invisible on a dashboard after the fact; these traces are the first thing to check when shots start missing low.
-- **Discrete `Shooter/ShotEvent/*` records** (§8.7) — the per-shot calibration snapshots.
+- **10 Hz shooter suite while enabled**: shot distance, hub heading error, target/actual pivot, target/actual RPS, RPS error, readiness, current, indexer values, state, and shot count.
+- **10 Hz battery**: `Battery/Voltage` and `Battery/BrownedOut` while enabled.
+- **Discrete `Shooter/ShotEvent/*` records** (§8.7) — per-shot calibration snapshots.
 
 `Robot` also lowers the brownout threshold to 6.0 V (`setBrownoutVoltage`, RIO 2 only, wrapped in a try so a RIO 1 keeps its default) — transient dips during a full-power shot-while-driving stay survivable instead of cutting outputs at the 6.75 V default.
 

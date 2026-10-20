@@ -328,7 +328,7 @@ public final class ShooterConstants {
         // overcome friction). 0.15 is a conservative starting estimate -- run SysId to
         // ground kS/kV/kA in real data. kP raised 0.125 -> 0.3 to fight the velocity dip
         // when a ball passes through harder; tune it up toward the edge of oscillation
-        // using the DogLog Shooter/RpsError trace. kD intentionally left 0: on a velocity
+        // using the data-log Shooter/RpsError trace. kD intentionally left 0: on a velocity
         // loop it differentiates an already-noisy signal and usually hurts more than helps.
         private static final double kS = 0.15;
         private static final double kV = .125;

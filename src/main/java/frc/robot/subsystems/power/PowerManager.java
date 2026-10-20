@@ -4,12 +4,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
-import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.shooter.Shooter;
+import frc.robot.util.RobotLogger;
 
 /**
  * Dynamic current budgeting. Instead of one static worst-case supply limit per motor group,
@@ -71,9 +71,9 @@ public class PowerManager extends SubsystemBase {
     }
     m_applied = m_candidate;
     SmartDashboard.putString("PowerManager/Applied", m_applied.toString());
-    DogLog.log("PowerManager/Mode", m_applied.toString());
-    DogLog.log("PowerManager/DriveSupplyA", m_applied.driveSupplyCurrent);
-    DogLog.log("PowerManager/FlywheelSupplyA", m_applied.flywheelSupplyCurrent);
+    RobotLogger.log("PowerManager/Mode", m_applied.toString());
+    RobotLogger.log("PowerManager/DriveSupplyA", m_applied.driveSupplyCurrent);
+    RobotLogger.log("PowerManager/FlywheelSupplyA", m_applied.flywheelSupplyCurrent);
 
     final double driveAmps = m_applied.driveSupplyCurrent;
     final double flywheelAmps = m_applied.flywheelSupplyCurrent;
