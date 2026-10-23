@@ -2,7 +2,7 @@
 
 **FRC Team 2035 — 2026 Season (*REBUILT*)**
 Repository: `CarmelRobotics/Eclipse`, branch `summer` · Java 17, WPILib 2026 command-based, GradleRIO
-Major dependencies: CTRE Phoenix 6 (26.1.0), PathPlanner (2026.1.2), DogLog (2026.5.0)
+Major dependencies: CTRE Phoenix 6 (26.1.0), PathPlanner (2026.1.2), WPILib DataLog
 Last updated: 2026-07-06 (post field-calibration session of 2026-07-04; before second field session)
 
 ---
@@ -603,13 +603,13 @@ Per-motor results land under `SystemsCheck/{Shooter,Lintake,Drive}/…`, with pe
 
 ## 13. Telemetry and Tuning Infrastructure
 
-### 13.1 DogLog
+### 13.1 WPILib DataLog
 
-Initialized in the `Robot` constructor: WPILOG file output, live NetworkTables mirroring (`ntPublish`), and DS/joystick capture. The always-on channel set:
+Initialized in `Robot` through `RobotLogger`: WPILib's binary WPILOG file output with NetworkTables and console mirroring disabled. The logger keeps only low-rate, explicitly selected diagnostics to avoid high-frequency allocation and queue pressure:
 
-- **Per-loop shooter suite**: shot distance, hub heading error, target/actual pivot, target/commanded/actual RPS, RPS error, all readiness gates (hub and pass), average flywheel current, indexer current and volts, all three state enums, shot count, ball-in-flywheel.
-- **Battery**: `Battery/Voltage` and `Battery/BrownedOut` every loop from `robotPeriodic` — sag is invisible on a dashboard after the fact; these traces are the first thing to check when shots start missing low.
-- **Discrete `Shooter/ShotEvent/*` records** (§8.7) — the per-shot calibration snapshots.
+- **10 Hz shooter suite while enabled**: shot distance, hub heading error, target/actual pivot, target/actual RPS, RPS error, readiness, current, indexer values, state, and shot count.
+- **10 Hz battery**: `Battery/Voltage` and `Battery/BrownedOut` while enabled.
+- **Discrete `Shooter/ShotEvent/*` records** (§8.7) — per-shot calibration snapshots.
 
 `Robot` also lowers the brownout threshold to 6.0 V (`setBrownoutVoltage`, RIO 2 only, wrapped in a try so a RIO 1 keeps its default) — transient dips during a full-power shot-while-driving stay survivable instead of cutting outputs at the 6.75 V default.
 
@@ -751,6 +751,14 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 |---|---|---|
 | `ShotTuning/HeadingOffsetDeg` | 0 | Mechanical aim trim (1° steps; applies to hub and pass bearing) |
 | `ShotTuning/MoveCompGain` | 0.7 | Shoot-on-the-move velocity lead scale (0 = aim as if stationary) |
+| `FeatureFlags/TrajectoryMap` | false | Enable generated distance + radial-velocity shot map; false uses calibrated 1D tables |
+| `ShotTuning/ImpactCompGain` | 1.0 | Acceleration lead scale after a detected drivetrain disturbance |
+| `ShotTuning/ImpactJerkThreshold` | 100.0 m/s³ | Pigeon jerk that arms impact compensation |
+| `ShotTuning/ImpactCompDuration` | 0.30 s | Duration of the transient impact compensation window |
+| `ShotTuning/TiltPivotGain` | 1.0 | Scale for the tilt-derived pivot correction |
+| `ShotTuning/NoShotRecoveryTimeout` | 1.0 s | Time feeding without a detected shot before indexer recovery |
+| `ShotTuning/JamReverseDuration` | 0.18 s | Duration of each automatic indexer reverse pulse |
+| `ShotTuning/MaxRecoveryAttempts` | 2 | Reverse/retry attempts before declaring a feed fault |
 | `ShotTuning/ShootingSpeedScale` | 0.45 | Translation cap while aiming |
 | `ShotTuning/PivotOffset` | 0 | Shifts entire hub pivot table |
 | `ShotTuning/ShooterRpsOffset` | 0 | Shifts entire hub RPS table |
@@ -766,6 +774,24 @@ All under `LoggedTunableNumber` (frozen at defaults when tuning mode is off) exc
 | `ShotTuning/IndexerCurrentLimitA / IndexerCurrentTimeoutS` | 25 / 0.2 | Indexer overcurrent trip |
 | Shot-detection dip / recover thresholds | 5.0 / 2.0 RPS | Ball-passage detector sensitivity |
 | `Sim/PoseX / PoseY / PoseHeadingDeg` | 4.6 / 0.75 / 0 | Pose-setter inputs |
+
+### Tilt and impact compensation (added)
+
+The cached shot solution now transforms the calibrated 3D trajectory through the inverse Pigeon pitch/roll. Its horizontal projection updates aim bearing and distance, while the elevation change produces a pivot correction. `ShotTuning/TiltPivotGain` defaults to 1.0. The Pigeon X/Y acceleration is filtered and differentiated into jerk; a sharp jerk event arms a short-lived window, while filtered drivetrain acceleration supplies the `1/2*a*t^2` lead so a hit while aiming is accounted for during ball flight. Tune `ShotTuning/ImpactJerkThreshold`, `ShotTuning/ImpactCompGain`, and `ShotTuning/ImpactCompDuration` from logs. Both behaviors can be disabled through `FeatureFlags/TiltCompensation` and `FeatureFlags/ImpactCompensation` and should be validated with low-speed bump tests before match use.
+
+### Automatic feed recovery and zone controller
+
+All shot and pass feed commands now use a small feed-recovery state machine. If no velocity-dip shot is detected for `ShotTuning/NoShotRecoveryTimeout`, the indexer reverses for `ShotTuning/JamReverseDuration` and retries. After `ShotTuning/MaxRecoveryAttempts`, feeding stops and the dashboard reports a fault for manual clearing. `ZoneController` classifies the robot as alliance, bump, trench, neutral, or opponent-side and publishes the selected default action under `zone/*`; the right-trigger hub/pass decision uses it when `FeatureFlags/ZoneController` is enabled.
+
+### Offline trajectory-map generator
+
+`tools/generate_trajectory_map.py` searches launch angle and ball speed for every distance/radial-velocity cell. It scores candidates by the smallest vertical margin to the modeled hub-opening boundaries across angle, speed, and velocity error corners. Positive `robust_margin_m` values meet the requested uncertainty budget; negative values identify cells that need more speed range, a wider valid opening model, or field calibration. Example:
+
+```powershell
+python tools/generate_trajectory_map.py --output work/trajectory_map.csv
+```
+
+The CSV contains distance, radial velocity, launch angle, pivot output rotations, wheel RPS, time of flight, and robustness margin. The defaults are based on Eclipse's current release height, 4-inch wheel, 75% transfer efficiency, 1.5–5.0 m score range, and ±3 m/s radial velocity. The generated CSV is deployed as `src/main/deploy/trajectory-map.csv`; `TrajectoryMap` bilinearly interpolates it at runtime when `FeatureFlags/TrajectoryMap` is enabled. The flag defaults to false so the existing field-calibrated one-dimensional tables remain the safe baseline until the map is validated on the robot.
 
 ## Appendix D: CAN ID Map
 

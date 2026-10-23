@@ -44,16 +44,21 @@ import frc.robot.util.LoggedTunableNumber;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
+import frc.robot.subsystems.strategy.ZoneController;
 
 public class RobotContainer {
+  // A stale dashboard feature flag must not re-enable driver assists in competition.
+  private static final boolean kCompetitionDriverAssists = false;
+
   private final Timer m_autoTimer = new Timer();
   private boolean m_autoTravelReady = true;
   private final Map<Command, Command> m_guardedAutos = new IdentityHashMap<>();
   private final SwerveRequest.FieldCentricFacingAngle m_autoTravelRequest =
       new SwerveRequest.FieldCentricFacingAngle();
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
-  private final Lintake m_lintake = new Lintake();
+  private final Lintake m_lintake = new Lintake(m_drivetrain);
   private final Shooter m_shooter = new Shooter(m_drivetrain);
+  private final ZoneController m_zoneController = new ZoneController(m_drivetrain);
   private final SystemsCheck m_systemsCheck = new SystemsCheck(m_drivetrain, m_shooter, m_lintake);
   // Drive supply: 91 A only in auto, 40 A otherwise, with low-voltage fallback.
   // Optional flywheel budget changes remain gated by FeatureFlags.POWER_MANAGER.
@@ -248,6 +253,7 @@ public class RobotContainer {
         .and(aimHeld.negate())
         .and(m_controller.x().negate())
         .and(FeatureFlags.DRIVER_ASSISTS)
+        .and(() -> kCompetitionDriverAssists)
         .and(teleop);
 
     assistActive.whileTrue(m_drivetrain.applyRequest(this::assistDriveRequest));
@@ -308,6 +314,7 @@ public class RobotContainer {
             // instead of wasting balls on a dead hub. Latches at the pull like everything
             // else -- a shift flip mid-hold doesn't yank the mode out from under the driver.
             () -> m_drivetrain.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
+                && (!FeatureFlags.ZONE_CONTROLLER.getAsBoolean() || m_zoneController.shouldShootHub())
                 && (m_drivetrain.isInAllianceZone() || !FeatureFlags.ALLIANCE_ZONE_GATE.getAsBoolean())
                 && (m_drivetrain.isOurHubActive() || !FeatureFlags.SHIFTS_GATE.getAsBoolean())
         )
@@ -337,7 +344,7 @@ public class RobotContainer {
     );
     // Manual flat-out ferry kept as a fallback (fixed 90 RPS, no aim assist).
     m_controller.povRight().and(teleop).whileTrue(
-        heldShotCommand(PivotState.LOB, ShooterState.SEND)
+        heldFerryCommand()
     );
 
     // Clear jam: reverse flywheel and indexer to back out a stuck ball.
@@ -510,7 +517,7 @@ public class RobotContainer {
         Commands.sequence(
             prepareShotCommand(pivotState, shooterState),
             Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-            Commands.run(this::feed, m_shooter).withTimeout(feedSeconds)
+            m_shooter.feedWithRecoveryCommand().withTimeout(feedSeconds)
         ),
         lintakePumpCommand(),
         m_drivetrain.faceHubCommand(() -> 0.0, () -> 0.0)
@@ -570,7 +577,25 @@ public class RobotContainer {
         Commands.sequence(
             prepareShotCommand(pivotState, shooterState),
             Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
-            Commands.run(this::feed, m_shooter)
+            m_shooter.feedWithRecoveryCommand()
+        ),
+        lintakePumpCommand()
+    )).finallyDo(interrupted -> {
+      stopShooter();
+      m_lintake.setPinionState(PinionState.GROUND);
+      m_lintake.setState(RollerState.ZERO);
+    });
+  }
+
+  // Manual flat-out ferry. This has its own readiness gate because readyToShoot() checks the
+  // distance-interpolated SCORE target, which can never match the fixed SEND state at 90 RPS.
+  private Command heldFerryCommand() {
+    return Commands.runOnce(() -> m_lintake.setState(RollerState.AGITATE)).andThen(Commands.deadline(
+        Commands.sequence(
+            prepareShotCommand(PivotState.LOB, ShooterState.SEND),
+            Commands.waitUntil(m_shooter::readyToFerry)
+                .withTimeout(ShooterConstants.kFerrySpinupTimeoutSeconds),
+            m_shooter.feedWithRecoveryCommand()
         ),
         lintakePumpCommand()
     )).finallyDo(interrupted -> {
@@ -591,7 +616,7 @@ public class RobotContainer {
         Commands.sequence(
             prepareShotCommand(PivotState.PASS, ShooterState.PASS),
             Commands.waitUntil(m_shooter::readyToPass).withTimeout(ShooterConstants.kPassSpinupTimeoutSeconds),
-            Commands.run(this::feed, m_shooter)
+            m_shooter.feedWithRecoveryCommand()
         ),
         lintakePumpCommand()
     ).finallyDo(interrupted -> stopShooter());
@@ -618,14 +643,6 @@ public class RobotContainer {
     m_shooter.setState(IndexerState.ZERO);
     m_shooter.setState(ShooterState.ZERO);
     m_shooter.setState(PivotState.STOW);
-  }
-
-  // === Feed (unconditional) ===
-  // Run the indexer. Only reached after readyToShoot() *or* the spinup timeout, so this
-  // is where the "force-feed after timeout" behavior happens. The command continues until
-  // timed out (autonomous) or manually released (teleop).
-  private void feed() {
-    m_shooter.setState(IndexerState.SCORE);
   }
 
   private double driverXVelocity() {

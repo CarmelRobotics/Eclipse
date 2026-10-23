@@ -19,6 +19,7 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.util.LoggedTunableNumber;
+import frc.robot.util.RobotLogger;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
@@ -162,9 +163,21 @@ public class Shooter extends SubsystemBase {
 
     private final LoggedTunableNumber m_shotDipRps = new LoggedTunableNumber("ShotTuning/ShotDipRps", 5.0);
     private final LoggedTunableNumber m_shotRecoverRps = new LoggedTunableNumber("ShotTuning/ShotRecoverRps", 2.0);
+    private final LoggedTunableNumber m_noShotRecoveryTimeout =
+        new LoggedTunableNumber("ShotTuning/NoShotRecoveryTimeout", 1.0);
+    private final LoggedTunableNumber m_jamReverseDuration =
+        new LoggedTunableNumber("ShotTuning/JamReverseDuration", 0.18);
+    private final LoggedTunableNumber m_maxRecoveryAttempts =
+        new LoggedTunableNumber("ShotTuning/MaxRecoveryAttempts", 2.0);
     private int m_shotCount = 0;
     private boolean m_shotArmed = false;   // wheel has reached target velocity at least once; ready to detect dips
     private boolean m_inDip = false;       // currently experiencing a dip (ball in flight or stuck)
+
+    private enum FeedRecoveryPhase { IDLE, FEEDING, REVERSING, FAULT }
+    private FeedRecoveryPhase m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
+    private double m_feedRecoveryPhaseStart = 0.0;
+    private int m_feedRecoveryBaselineShotCount = 0;
+    private int m_feedRecoveryAttempts = 0;
 
     private final CommandSwerveDrivetrain m_drive;
 
@@ -290,6 +303,68 @@ public class Shooter extends SubsystemBase {
             },
             this
         );
+    }
+
+    /** Feeds continuously and automatically reverses the indexer if no shot is detected. */
+    public Command feedWithRecoveryCommand() {
+        return Commands.runEnd(
+            this::runFeedWithRecovery,
+            this::stopFeedWithRecovery,
+            this
+        );
+    }
+
+    private void runFeedWithRecovery() {
+        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        if (m_feedRecoveryPhase == FeedRecoveryPhase.IDLE) {
+            m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
+            m_feedRecoveryPhaseStart = now;
+            m_feedRecoveryBaselineShotCount = m_shotCount;
+            m_feedRecoveryAttempts = 0;
+        }
+
+        switch (m_feedRecoveryPhase) {
+            case FEEDING -> {
+                setState(IndexerState.SCORE);
+                if (m_shotCount > m_feedRecoveryBaselineShotCount) {
+                    // A real shot proves the feed path is moving. Start a fresh
+                    // no-shot window and forget prior recovery attempts.
+                    m_feedRecoveryBaselineShotCount = m_shotCount;
+                    m_feedRecoveryPhaseStart = now;
+                    m_feedRecoveryAttempts = 0;
+                } else if (now - m_feedRecoveryPhaseStart >= m_noShotRecoveryTimeout.get()) {
+                    if (m_feedRecoveryAttempts >= Math.round(m_maxRecoveryAttempts.get())) {
+                        m_feedRecoveryPhase = FeedRecoveryPhase.FAULT;
+                        setState(IndexerState.ZERO);
+                        SmartDashboard.putString("shooter/feed recovery", "FAULT - clear jam");
+                    } else {
+                        m_feedRecoveryAttempts++;
+                        m_feedRecoveryPhase = FeedRecoveryPhase.REVERSING;
+                        m_feedRecoveryPhaseStart = now;
+                        SmartDashboard.putString("shooter/feed recovery", "REVERSING");
+                    }
+                }
+            }
+            case REVERSING -> {
+                setState(IndexerState.REVERSE);
+                if (now - m_feedRecoveryPhaseStart >= m_jamReverseDuration.get()) {
+                    m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
+                    m_feedRecoveryPhaseStart = now;
+                    m_feedRecoveryBaselineShotCount = m_shotCount;
+                    SmartDashboard.putString("shooter/feed recovery", "RETRYING");
+                }
+            }
+            case FAULT -> setState(IndexerState.ZERO);
+            case IDLE -> { /* initialized above */ }
+        }
+        SmartDashboard.putString("shooter/feed recovery phase", m_feedRecoveryPhase.toString());
+        SmartDashboard.putNumber("shooter/feed recovery attempts", m_feedRecoveryAttempts);
+    }
+
+    private void stopFeedWithRecovery() {
+        setState(IndexerState.ZERO);
+        m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
+        m_feedRecoveryAttempts = 0;
     }
 
     // === Active self-test (pit motor test) ===
@@ -453,6 +528,21 @@ public class Shooter extends SubsystemBase {
         return spunUp && pivotReady && aimed;
     }
 
+    // SEND is a fixed-speed manual ferry, not the distance-interpolated SCORE solution.
+    public boolean readyToFerry() {
+        boolean spunUp = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble()
+            - ShooterConstants.kSendShooterRps) <= ShooterConstants.kShooterReadyToleranceRps;
+        double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble()
+            / ShooterConstants.kPivotGearRatio;
+        boolean pivotReady = Math.abs(pivotOutputRot - ShooterConstants.kLobPivotPosition)
+            <= ShooterConstants.kPivotReadyToleranceRotations;
+        if (diagLoop()) {
+            SmartDashboard.putBoolean("ready/ferry spun up", spunUp);
+            SmartDashboard.putBoolean("ready/ferry pivot", pivotReady);
+        }
+        return spunUp && pivotReady;
+    }
+
     // Diagnostic decimation: dashboard publishing runs at 10 Hz (every 5th loop). The
     // counter only advances in periodic(); readyToShoot()/readyToPass() read diagLoop()
     // without advancing it, so however many times commands poll them in a loop, the
@@ -472,8 +562,18 @@ public class Shooter extends SubsystemBase {
         // we interpolate the shot table to get the pivot and RPS for that distance, then
         // add the live offsets so the driver can trim without redeploying.
         double shotDistance = m_drive.getShotDistance();
-        m_targetPivotPosition = ShooterConstants.getScorePivotPosition(shotDistance) + m_pivotOffset.get();
-        m_targetShooterRps = ShooterConstants.getScoreShooterRps(shotDistance) + m_shooterRpsOffset.get();
+        var trajectorySolution = FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
+            ? TrajectoryMap.lookup(shotDistance, m_drive.getShotRadialVelocityMetersPerSecond())
+            : java.util.Optional.<TrajectoryMap.Solution>empty();
+        double nominalPivot = trajectorySolution
+            .map(TrajectoryMap.Solution::pivotOutputRotations)
+            .orElseGet(() -> ShooterConstants.getScorePivotPosition(shotDistance));
+        double nominalRps = trajectorySolution
+            .map(TrajectoryMap.Solution::wheelRps)
+            .orElseGet(() -> ShooterConstants.getScoreShooterRps(shotDistance));
+        m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(nominalPivot)
+            + m_pivotOffset.get();
+        m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
         m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
 
         // === Live flywheel gain re-tuning ===
@@ -506,6 +606,7 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
             SmartDashboard.putNumber("interpolated pivot position", m_targetPivotPosition);
             SmartDashboard.putNumber("interpolated shooter rps", m_targetShooterRps);
+            SmartDashboard.putBoolean("shot trajectory map active", trajectorySolution.isPresent());
             SmartDashboard.putBoolean("ready to shoot", ready);
         }
 
@@ -674,10 +775,27 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
             SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
 
-            // The tuning signal the flywheel-gain procedure watches (target vs actual under
-            // load). Was a DogLog/WPILOG trace before DogLog was removed (see Robot.java);
-            // live-only now, at the 10 Hz diagnostic rate.
+            // Live companion to the explicitly selected WPILib RpsError log entry.
             SmartDashboard.putNumber("ShotTuning/RpsError", commandedRps - actualRps);
+        }
+        if (RobotLogger.shouldLogPeriodic()) {
+            RobotLogger.log("Shooter/ShotDistanceM", shotDistance);
+            RobotLogger.log("Shooter/HubHeadingErrorDeg", m_drive.getHubHeadingError().getDegrees());
+            RobotLogger.log("Shooter/TargetPivotRot", m_targetPivotPosition);
+            RobotLogger.log("Shooter/ActualPivotRot", pivotOutputRot);
+            RobotLogger.log("Shooter/TargetRps", m_targetShooterRps);
+            RobotLogger.log("Shooter/ActualRps", actualRps);
+            RobotLogger.log("Shooter/RpsError", commandedRps - actualRps);
+            RobotLogger.log("Shooter/ReadyToShoot", ready);
+            RobotLogger.log("Shooter/AvgCurrentA", getAvgShooterCurrentDraw());
+            RobotLogger.log("Shooter/IndexerCurrentA", indexerCurrent);
+            RobotLogger.log("Shooter/IndexerVolts", m_indexerState.volts);
+            RobotLogger.log("Shooter/IndexerRps", m_indexerMotor.getVelocity().getValueAsDouble());
+            RobotLogger.log("Shooter/ShotCount", m_shotCount);
+            RobotLogger.log("Shooter/BallInFlywheel", m_inDip);
+            RobotLogger.log("Shooter/PivotState", m_pivotState.toString());
+            RobotLogger.log("Shooter/ShooterState", m_shooterState.toString());
+            RobotLogger.log("Shooter/IndexerState", m_indexerState.toString());
         }
     }
 
@@ -692,14 +810,24 @@ public class Shooter extends SubsystemBase {
     // ball landed, glance at the string, and the tuning table row writes itself. Recording
     // the offsets matters most: a shot that landed perfectly with RpsOffset=+2 means the
     // TABLE is 2 RPS low there; without the trim in the record, the post-session bake-in
-    // is guesswork. (Was also a per-shot WPILOG record until DogLog was removed -- see
-    // Robot.java. Live dashboard string only now, so note it down before the next shot
-    // overwrites it.)
+    // is guesswork. The explicit WPILib shot-event entries retain the same snapshot;
+    // the live dashboard string is overwritten by the next detected shot.
     private void logShotEvent(double commandedRps, double actualRps, double shotDistance) {
         // Passes care about the ferry distance, not the hub distance.
         double distance = m_shooterState == ShooterState.PASS ? m_drive.getPassDistance() : shotDistance;
         double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
         double headingErrDeg = m_drive.getHubHeadingError().getDegrees();
+        RobotLogger.log("Shooter/ShotEvent/Number", m_shotCount);
+        RobotLogger.log("Shooter/ShotEvent/Mode", m_shooterState.toString());
+        RobotLogger.log("Shooter/ShotEvent/DistanceM", distance);
+        RobotLogger.log("Shooter/ShotEvent/CommandedRps", commandedRps);
+        RobotLogger.log("Shooter/ShotEvent/ActualRps", actualRps);
+        RobotLogger.log("Shooter/ShotEvent/PivotRot", pivotOutputRot);
+        RobotLogger.log("Shooter/ShotEvent/HeadingErrorDeg", headingErrDeg);
+        RobotLogger.log("Shooter/ShotEvent/RpsOffset", m_shooterRpsOffset.get());
+        RobotLogger.log("Shooter/ShotEvent/PivotOffset", m_pivotOffset.get());
+        RobotLogger.log("Shooter/ShotEvent/PassRpsOffset", m_passRpsOffset.get());
+        RobotLogger.log("Shooter/ShotEvent/BatteryVolts", RobotController.getBatteryVoltage());
         SmartDashboard.putString("last shot", String.format(
             "#%d %s %.2f m | rps %.1f | pivot %.3f | hdg %.1f deg | trim rps %+.1f piv %+.3f",
             m_shotCount, m_shooterState, distance, commandedRps, pivotOutputRot,

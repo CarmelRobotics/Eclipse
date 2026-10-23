@@ -13,6 +13,7 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.shooter.Shooter;
+import frc.robot.util.RobotLogger;
 
 /**
  * Dynamic current budgeting. Instead of one static worst-case supply limit per motor group,
@@ -93,6 +94,9 @@ public class PowerManager extends SubsystemBase {
     SmartDashboard.putString("PowerManager/Applied", m_applied == null ? "IDLE" : m_applied.toString());
     SmartDashboard.putNumber("PowerManager/DriveSupplyA", m_requestedDrive);
     SmartDashboard.putNumber("PowerManager/FlywheelSupplyA", m_requestedFlywheel);
+    RobotLogger.log("PowerManager/Mode", m_applied == null ? "IDLE" : m_applied.toString());
+    RobotLogger.log("PowerManager/DriveSupplyA", m_requestedDrive);
+    RobotLogger.log("PowerManager/FlywheelSupplyA", m_requestedFlywheel);
     requestUpdate();
   }
 

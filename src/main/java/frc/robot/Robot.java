@@ -10,6 +10,7 @@ import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.util.LoggedTunableNumber;
+import frc.robot.util.RobotLogger;
 
 public class Robot extends TimedRobot {
   private Command m_autonomousCommand;
@@ -18,17 +19,9 @@ public class Robot extends TimedRobot {
   private final RobotContainer m_robotContainer;
 
   public Robot() {
-    // NO DOGLOG / NO STRUCTURED LOGGING (deliberate). DogLog 2026.5.0 crashed the robot
-    // with a NATIVE out-of-memory (pthread_create EAGAIN), including mid-match on
-    // 2026-07-14: its logExtras option (default TRUE) polls the radio's HTTP status page
-    // via java.net.http.HttpClient every cycle (verified by decompiling the jar), and when
-    // that page doesn't answer, the client's thread pool grows without bound until the JVM
-    // can't spawn threads. It looks like a heap leak but isn't -- no Java-side mitigation
-    // (GC calls, less logging) touches it. Root-caused and removed 2026-07-11; the removal
-    // was lost in the 2026-07-14 revert to the 07-09 code and the crash immediately
-    // returned, so it's now removed again -- vendor dep deleted, all call sites stripped.
-    // If a vendor logging library is ever reconsidered, audit what it does with the
-    // network first. Live telemetry is SmartDashboard-only.
+    // DogLog remains removed after the native-memory failures. Keep only explicitly
+    // selected, low-rate WPILib log entries; no NetworkTables/console mirroring.
+    RobotLogger.start();
 
     // Dashboard tunables (ShotTuning/*) are live. Set false for competition so a stray
     // dashboard edit can't change gains or offsets mid-match.
@@ -48,14 +41,17 @@ public class Robot extends TimedRobot {
 
   @Override
   public void robotPeriodic() {
+    RobotLogger.periodic();
     CommandScheduler.getInstance().run();
 
-    // Battery health, live at 10 Hz: if shots start missing low or the robot stutters,
-    // check these first. (Live-only since DogLog's removal -- watch them AT the field;
-    // there is no log file to check after the fact.)
+    // Keep live dashboard writes decimated independently of the enabled-only file log.
     if (++m_diagLoopCount % 5 == 0) {
       SmartDashboard.putNumber("Battery/Voltage", RobotController.getBatteryVoltage());
       SmartDashboard.putBoolean("Battery/BrownedOut", RobotController.isBrownedOut());
+    }
+    if (RobotLogger.shouldLogPeriodic()) {
+      RobotLogger.log("Battery/Voltage", RobotController.getBatteryVoltage());
+      RobotLogger.log("Battery/BrownedOut", RobotController.isBrownedOut());
     }
   }
 
