@@ -7,99 +7,67 @@
         {
           "type": "named",
           "data": {
-            "name": "intake deploy"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
-            "name": "intake run"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_PASS_PRELOAD_STARTING_TO_RIGHT_PASS_FAR_MID_FIELD"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_PASS_FAR_MID_FIELD_TO_RIGHT_PASS_NEAR_MID_FIELD"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_PASS_NEAR_MID_FIELD_TO_RIGHT_TRENCH_RETURN"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_TRENCH_RETURN_TO_RIGHT_SCORE"
-          }
-        },
-        {
-          "type": "race",
-          "data": {
-            "commands": [
-              {
-                "type": "named",
-                "data": {
-                  "name": "dump"
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 4.0
-                }
-              }
-            ]
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_CYCLE2_SCORE_TO_CYCLE2_FAR_MID_FIELD"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_CYCLE2_FAR_MID_FIELD_TO_CYCLE2_NEAR_MID_FIELD"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_CYCLE2_NEAR_MID_FIELD_TO_CYCLE2_SCORE"
-          }
-        },
-        {
-          "type": "race",
-          "data": {
-            "commands": [
-              {
-                "type": "named",
-                "data": {
-                  "name": "dump"
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 4.0
-                }
-              }
-            ]
+            "name": "auto start right"
           }
         },
         {
           "type": "named",
           "data": {
             "name": "intake stop"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_RIGHT_DOUBLE_START_TO_FUEL"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_RIGHT_COLLECT1_TO_SCORE"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "shoot"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "auto cycle 2 right"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_RIGHT_SCORE_TO_FUEL2"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_RIGHT_COLLECT2_TO_SCORE"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "auto finish shoot"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "stopshoot"
           }
         }
       ]

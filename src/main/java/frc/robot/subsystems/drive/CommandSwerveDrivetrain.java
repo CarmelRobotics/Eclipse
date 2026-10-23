@@ -41,6 +41,7 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
 import frc.robot.Constants;
 import frc.robot.config.FeatureFlags;
+import frc.robot.subsystems.power.DriveCurrentPolicy;
 import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
 import frc.robot.subsystems.localisation.LimelightHelpers;
 import frc.robot.subsystems.localisation.LimelightInfo;
@@ -69,7 +70,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // 1-degree steps: if shots move the wrong way, flip the sign. Bake the final value
     // into the default here once dialed in.
     private final LoggedTunableNumber m_headingOffsetDeg =
-        new LoggedTunableNumber("ShotTuning/HeadingOffsetDeg", 0);
+        new LoggedTunableNumber("ShotTuning/HeadingOffsetDeg", 6.7);
 
     // Which side of the field the pass target sits on, with 0.5 m of hysteresis around
     // the centerline so the target (and the heading lock chasing it) can't flicker
@@ -308,18 +309,23 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return run(() -> this.setControl(request.get()));
     }
 
-    // Runtime supply-current reallocation for the PowerManager. Re-applies a supply-only
-    // current limit to all four drive motors (matching TunerConstants, which sets supply
-    // only on the drive side -- traction is bounded separately by the 120 A slip current).
+    // Runtime supply-current reallocation; preserve the separate 120 A stator bound.
     // Config applies block for ~a millisecond each, so the PowerManager calls this from a
     // background thread; the short timeout keeps a missing device from hanging that thread.
-    public void applyDriveSupplyCurrentLimit(double amps) {
-        var limits = new com.ctre.phoenix6.configs.CurrentLimitsConfigs()
-            .withSupplyCurrentLimit(amps)
-            .withSupplyCurrentLimitEnable(true);
+    public boolean applyDriveSupplyCurrentLimit(double amps) {
+        boolean applied = true;
         for (int i = 0; i < 4; i++) {
-            getModule(i).getDriveMotor().getConfigurator().apply(limits, 0.05);
+            // Recheck at each motor: never apply a stale auto boost after mode transition.
+            var limits = DriveCurrentPolicy.currentLimits(amps,
+                DriverStation.isAutonomousEnabled(), RobotController.getBatteryVoltage());
+            var status = getModule(i).getDriveMotor().getConfigurator()
+                .apply(limits, 0.05);
+            if (!status.isOK()) {
+                applied = false;
+                DriverStation.reportWarning("Drive current config failed on module " + i + ": " + status, false);
+            }
         }
+        return applied;
     }
 
     /**
@@ -382,6 +388,14 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     @Override
     public void periodic() {
+        // Diagnostic decimation: pure-dashboard writes run at 10 Hz (every 5th loop), not
+        // 50 Hz. Each SmartDashboard.put* is a string-keyed map lookup + NT update; this
+        // subsystem alone was doing ~20 per loop, a real slice of the 20 ms budget and a
+        // steady source of the "CommandScheduler loop overrun" spam. Control logic
+        // (vision fusion, shot solution, hub-active state) still runs every loop --
+        // ONLY the publishing is decimated.
+        m_diagLoopCount++;
+        boolean diagLoop = m_diagLoopCount % 5 == 0;
         /*
          * Periodically try to apply the operator perspective.
          * If we haven't applied the operator perspective before, then we should apply it regardless of DS state.
@@ -462,15 +476,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             }
 
             // Raw vision diagnostics -- compare these against where the robot actually is.
-            SmartDashboard.putNumber("vision/pose x", estimate.pose.getX());
-            SmartDashboard.putNumber("vision/pose y", estimate.pose.getY());
-            SmartDashboard.putNumber("vision/tag count", estimate.tagCount);
-            SmartDashboard.putNumber("vision/avg tag dist", estimate.avgTagDist);
-            // Camera-yaw diagnostic: with the gyro seeded correctly, this vision heading
-            // should MATCH "pose heading". If it's ~180 deg off, the Limelight mounting yaw
-            // is wrong -- that mismatch is what reverses controls when the heading seed is on.
-            SmartDashboard.putNumber("vision/pose heading deg", estimate.pose.getRotation().getDegrees());
-            SmartDashboard.putNumber("pose heading deg", getState().Pose.getRotation().getDegrees());
+            if (diagLoop) {
+                SmartDashboard.putNumber("vision/pose x", estimate.pose.getX());
+                SmartDashboard.putNumber("vision/pose y", estimate.pose.getY());
+                SmartDashboard.putNumber("vision/tag count", estimate.tagCount);
+                SmartDashboard.putNumber("vision/avg tag dist", estimate.avgTagDist);
+                // Camera-yaw diagnostic: with the gyro seeded correctly, this vision heading
+                // should MATCH "pose heading". If it's ~180 deg off, the Limelight mounting yaw
+                // is wrong -- that mismatch is what reverses controls when the heading seed is on.
+                SmartDashboard.putNumber("vision/pose heading deg", estimate.pose.getRotation().getDegrees());
+                SmartDashboard.putNumber("pose heading deg", getState().Pose.getRotation().getDegrees());
+            }
         }
 
         // Solve the shoot-on-the-move aim for this loop (after vision so it uses the
@@ -486,46 +502,52 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             m_passHighSide = true;
         }
 
-        // === Dashboard diagnostics ===
-        m_field.setRobotPose(getState().Pose);
-        SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
-        SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
-        SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
-        // Aim sanity checks: WHICH hub the shot math is targeting and the heading it
-        // wants. If "dist to hub" doesn't match a tape measure, everything downstream
-        // (hood angle, RPS, aim) is being computed for the wrong target.
-        Translation2d targetHub = getHubPosition();
-        SmartDashboard.putNumber("aim/target hub x", targetHub.getX());
-        SmartDashboard.putNumber("aim/target hub y", targetHub.getY());
-        SmartDashboard.putNumber("aim/hub heading deg", getHubHeading().getDegrees());
-        Translation2d passTarget = getPassTarget();
-        SmartDashboard.putNumber("pass/target x", passTarget.getX());
-        SmartDashboard.putNumber("pass/target y", passTarget.getY());
-        SmartDashboard.putNumber("pass/distance", getPassDistance());
         // Hub-active state per the 2026 SHIFTS game data (cached for isOurHubActive(), which
-        // gates the right-trigger context choice). Computed BEFORE the aim/auto mode string
-        // below so the dashboard mirrors the exact condition a trigger pull would evaluate.
+        // gates the right-trigger context choice). Computed every loop -- it feeds real
+        // control decisions, not just the dashboard.
         double matchTime = DriverStation.getMatchTime();
         String gameData = effectiveGameData();
         m_ourHubActive = computeOurHubActive(matchTime, gameData);
-        SmartDashboard.putBoolean("our hub active", m_ourHubActive);
 
-        // What a right-trigger pull would do right now (the choice latches at the pull).
-        // Mirrors the binding's condition exactly: in range AND in the alliance zone AND
-        // our hub is active (during the opponent's shift a hub shot scores nothing, so
-        // the pull ferries instead).
-        boolean inAllianceZone = isInAllianceZone();
-        SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
-        SmartDashboard.putString("aim/auto mode",
-            getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
-                && inAllianceZone && m_ourHubActive
-                ? "HUB" : "PASS");
+        // === Dashboard diagnostics (decimated to 10 Hz) ===
+        if (diagLoop) {
+            m_field.setRobotPose(getState().Pose);
+            SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
+            SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
+            SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
+            // Aim sanity checks: WHICH hub the shot math is targeting and the heading it
+            // wants. If "dist to hub" doesn't match a tape measure, everything downstream
+            // (hood angle, RPS, aim) is being computed for the wrong target.
+            Translation2d targetHub = getHubPosition();
+            SmartDashboard.putNumber("aim/target hub x", targetHub.getX());
+            SmartDashboard.putNumber("aim/target hub y", targetHub.getY());
+            SmartDashboard.putNumber("aim/hub heading deg", getHubHeading().getDegrees());
+            Translation2d passTarget = getPassTarget();
+            SmartDashboard.putNumber("pass/target x", passTarget.getX());
+            SmartDashboard.putNumber("pass/target y", passTarget.getY());
+            SmartDashboard.putNumber("pass/distance", getPassDistance());
+            SmartDashboard.putBoolean("our hub active", m_ourHubActive);
 
-        // Compute which alliance currently has active hub (Blue or Red)
-        boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
-        String activeAlliance = blueHubActive ? "Blue" : "Red";
-        SmartDashboard.putString("active hub alliance", activeAlliance);
+            // What a right-trigger pull would do right now (the choice latches at the pull).
+            // Mirrors the binding's condition exactly: in range AND in the alliance zone AND
+            // our hub is active (during the opponent's shift a hub shot scores nothing, so
+            // the pull ferries instead).
+            boolean inAllianceZone = isInAllianceZone();
+            SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
+            SmartDashboard.putString("aim/auto mode",
+                getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
+                    && inAllianceZone && m_ourHubActive
+                    ? "HUB" : "PASS");
+
+            // Compute which alliance currently has active hub (Blue or Red)
+            boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
+            String activeAlliance = blueHubActive ? "Blue" : "Red";
+            SmartDashboard.putString("active hub alliance", activeAlliance);
+        }
     }
+
+    // Diagnostic decimation counter -- see the top of periodic().
+    private int m_diagLoopCount = 0;
 
     // Cached each loop in periodic(). Defaults true so nothing is gated before the first
     // loop runs.

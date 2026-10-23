@@ -29,47 +29,21 @@
           }
         },
         {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        },
+        {
           "type": "path",
           "data": {
             "pathName": "doubleswipe2"
           }
         },
         {
-          "type": "race",
-          "data": {
-            "commands": [
-              {
-                "type": "parallel",
-                "data": {
-                  "commands": [
-                    {
-                      "type": "named",
-                      "data": {
-                        "name": "shoot"
-                      }
-                    },
-                    {
-                      "type": "named",
-                      "data": {
-                        "name": "intake retract"
-                      }
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 4.0
-                }
-              }
-            ]
-          }
-        },
-        {
           "type": "named",
           "data": {
-            "name": "intake stop"
+            "name": "dump"
           }
         }
       ]

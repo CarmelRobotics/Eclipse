@@ -9,12 +9,16 @@ import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
+import com.pathplanner.lib.util.FlippingUtil;
 
 import java.util.function.BooleanSupplier;
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.GenericHID.RumbleType;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -25,6 +29,7 @@ import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.config.FeatureFlags;
+import frc.robot.auto.AutoTiming;
 import frc.robot.subsystems.diagnostics.SystemsCheck;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.drive.TunerConstants;
@@ -41,15 +46,28 @@ import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 
 public class RobotContainer {
+  private final Timer m_autoTimer = new Timer();
+  private boolean m_autoTravelReady = true;
+  private final Map<Command, Command> m_guardedAutos = new IdentityHashMap<>();
+  private final SwerveRequest.FieldCentricFacingAngle m_autoTravelRequest =
+      new SwerveRequest.FieldCentricFacingAngle();
   private final CommandSwerveDrivetrain m_drivetrain = TunerConstants.createDrivetrain();
   private final Lintake m_lintake = new Lintake();
   private final Shooter m_shooter = new Shooter(m_drivetrain);
   private final SystemsCheck m_systemsCheck = new SystemsCheck(m_drivetrain, m_shooter, m_lintake);
-  // Dynamic current budgeting (drive vs. flywheel). Self-scheduling SubsystemBase; reads the
-  // desired mode each loop and re-applies limits on change. Gated by FeatureFlags.POWER_MANAGER.
+  // Drive supply: 91 A only in auto, 40 A otherwise, with low-voltage fallback.
+  // Optional flywheel budget changes remain gated by FeatureFlags.POWER_MANAGER.
   private final PowerManager m_powerManager =
       new PowerManager(m_drivetrain, m_shooter, this::desiredPowerMode);
   private final CommandXboxController m_controller = new CommandXboxController(0);
+
+  // Built ONCE: every CommandXboxController button accessor (rightTrigger(), a(), povUp())
+  // constructs a brand-new Trigger object per call. desiredPowerMode() runs at 50 Hz from
+  // the PowerManager, so calling the accessors inline there allocated three Triggers per
+  // loop -- steady garbage churn that worsened the OOM pressure. Poll this shared field
+  // instead.
+  private final Trigger m_aimHeld =
+      m_controller.rightTrigger().or(m_controller.a()).or(m_controller.povUp());
 
   private final SwerveRequest.FieldCentric driveRequest = new SwerveRequest.FieldCentric()
       .withDeadband(Constants.kMaxSpeed * 0.1)
@@ -137,21 +155,63 @@ public class RobotContainer {
   private void registerNamedCommands() {
     // Named commands for autonomous routines (referenced by PathPlanner autos).
     NamedCommands.registerCommand("zerodrive", Commands.none());
+    NamedCommands.registerCommand("auto start",
+        autoTravelCommand(AutoTiming.INITIAL_STOW_TIMEOUT_SECONDS));
+    // Eclipse starts sideways: the rear intake faces inward before the rush.
+    // Keep legacy "auto start" at 180 for the other saved routines.
+    NamedCommands.registerCommand("auto start left",
+        autoTravelCommand(AutoTiming.INITIAL_STOW_TIMEOUT_SECONDS, Rotation2d.fromDegrees(90))
+            .beforeStarting(() -> m_lintake.setState(RollerState.ZERO)));
+    NamedCommands.registerCommand("auto start right",
+        autoTravelCommand(AutoTiming.INITIAL_STOW_TIMEOUT_SECONDS, Rotation2d.fromDegrees(-90))
+            .beforeStarting(() -> m_lintake.setState(RollerState.ZERO)));
+    NamedCommands.registerCommand("auto travel",
+        autoTravelCommand(AutoTiming.TRAVEL_TIMEOUT_SECONDS));
+    NamedCommands.registerCommand("auto cycle 2 left", secondCycleCommand(Rotation2d.fromDegrees(-90)));
+    NamedCommands.registerCommand("auto cycle 2 right", secondCycleCommand(Rotation2d.fromDegrees(90)));
     NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
+    var collectBrake = new SwerveRequest.SwerveDriveBrake();
+    NamedCommands.registerCommand("auto collect settle", Commands.deadline(
+        Commands.waitSeconds(AutoTiming.COLLECT_SETTLE_SECONDS),
+        m_drivetrain.applyRequest(() -> collectBrake)));
     NamedCommands.registerCommand("intake retract", m_lintake.setState(PinionState.STOW));
     // Roller commands are runOnce lambdas since setState(RollerState) is void (not Command).
     NamedCommands.registerCommand("intake run", Commands.runOnce(() -> m_lintake.setState(RollerState.INTAKE)));
     NamedCommands.registerCommand("intake stop", Commands.runOnce(() -> m_lintake.setState(RollerState.ZERO)));
-    // Shoot: prepare, wait until ready-or-timeout, feed. 1.5 s feed window in auto.
-    NamedCommands.registerCommand("shoot", timedShotCommand(PivotState.SCORE, ShooterState.SCORE, 1.5));
-    // Dump: same, but a long 2.5 s feed to empty a full hopper (preload + a collect
-    // cycle) rather than the ~8-ball quick shot. Used by the multi-cycle trench autos.
-    NamedCommands.registerCommand("dump", timedShotCommand(PivotState.SCORE, ShooterState.SCORE, 2.5));
+    // Both initial dumps feed for the team's requested five seconds. Stop collecting
+    // while unloading/repositioning; the second path restarts intake AFTER the trench.
+    NamedCommands.registerCommand("shoot",
+        timedShotCommand(PivotState.SCORE, ShooterState.SCORE, AutoTiming.DUMP_FEED_SECONDS)
+            .beforeStarting(() -> m_lintake.setState(RollerState.ZERO)));
+    NamedCommands.registerCommand("dump", timedShotCommand(PivotState.SCORE, ShooterState.SCORE,
+        AutoTiming.DUMP_FEED_SECONDS).beforeStarting(() -> m_lintake.setState(RollerState.ZERO)));
+    // Spend all remaining autonomous time unloading after the final collection.
+    // The outer 19.8-second guard interrupts this command and cleans up outputs.
+    NamedCommands.registerCommand("auto finish shoot", timedShotCommand(
+        PivotState.SCORE, ShooterState.SCORE, AutoTiming.DURATION_SECONDS));
     NamedCommands.registerCommand("stopshoot", stopShooterCommand());
+  }
+
+  private Command secondCycleCommand(Rotation2d blueHeading) {
+    Command finishHere = timedShotCommand(PivotState.SCORE, ShooterState.SCORE,
+        AutoTiming.DURATION_SECONDS).beforeStarting(() -> SmartDashboard.putString("Auto/Status",
+            "Cycle 2 skipped; finish unloading at first score"));
+    return Commands.either(
+        Commands.sequence(
+            autoTravelCommand(AutoTiming.TRAVEL_TIMEOUT_SECONDS, blueHeading),
+            Commands.either(Commands.none(), finishHere,
+                () -> AutoTiming.canStartSecondCycle(m_autoTimer.get()))
+                .onlyIf(() -> m_autoTravelReady)),
+        // If the trench detour and a useful final shot cannot fit, keep unloading.
+        // The outer guard stops this branch without starting the following path.
+        timedShotCommand(PivotState.SCORE, ShooterState.SCORE, AutoTiming.DURATION_SECONDS)
+            .beforeStarting(() -> SmartDashboard.putString("Auto/Status", "Cycle 2 skipped before preparation")),
+        () -> AutoTiming.canStartSecondCycle(m_autoTimer.get()));
   }
 
   private void configureBindings() {
     final SwerveRequest idle = new SwerveRequest.Idle();
+    final Trigger teleop = new Trigger(DriverStation::isTeleopEnabled);
 
     // === Drive default command ===
     // Field-centric swerve with driver translation and rotation, deadbands on both.
@@ -172,6 +232,8 @@ public class RobotContainer {
     // === Driver assists: trench + tower sweep ===
     assistSnapRequest.HeadingController.setPID(8, 0, 0.2);
     assistSnapRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
+    m_autoTravelRequest.HeadingController.setPID(8, 0, 0.2);
+    m_autoTravelRequest.HeadingController.enableContinuousInput(-Math.PI, Math.PI);
 
     // Aiming outranks the assist: while right-trigger / A (hub aim) or POV-up (pass aim)
     // is held, the aim command owns the drivetrain (so you can pop out of the trench and
@@ -185,7 +247,8 @@ public class RobotContainer {
     Trigger assistActive = new Trigger(() -> currentAssistZone() != AssistZone.NONE)
         .and(aimHeld.negate())
         .and(m_controller.x().negate())
-        .and(FeatureFlags.DRIVER_ASSISTS);  // field kill switch for the assists
+        .and(FeatureFlags.DRIVER_ASSISTS)
+        .and(teleop);
 
     assistActive.whileTrue(m_drivetrain.applyRequest(this::assistDriveRequest));
     assistActive.onFalse(Commands.runOnce(() -> m_assistLockHeading = null));
@@ -203,19 +266,20 @@ public class RobotContainer {
     // }));
     //insideStructure.onFalse(Commands.runOnce(() -> m_lintake.setPinionState(PinionState.STOW)));
 
-    // --- Standard driver bindings (unchanged) ---
-    m_controller.povDown().onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
-    m_controller.leftBumper().onTrue(m_lintake.setState(PinionState.GROUND));
-    m_controller.rightBumper().onTrue(m_lintake.setState(PinionState.STOW));
+    // Driver buttons must not interrupt the autonomous command or reset its heading.
+    m_controller.povDown().and(teleop).onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
+    m_controller.leftBumper().and(teleop).onTrue(m_lintake.setState(PinionState.GROUND));
+    m_controller.rightBumper().and(teleop).onTrue(m_lintake.setState(PinionState.STOW));
+    m_controller.button(8).and(teleop).onTrue(m_lintake.zero());
 
-    m_controller.leftTrigger().whileTrue(
+    m_controller.leftTrigger().and(teleop).whileTrue(
         rollerWhileHeldCommand(RollerState.INTAKE)
     );
-    m_controller.povLeft().whileTrue(
+    m_controller.povLeft().and(teleop).whileTrue(
         rollerWhileHeldCommand(RollerState.EJECT)
     );
 
-    m_controller.a().whileTrue(
+    m_controller.a().and(teleop).whileTrue(
         Commands.parallel(
             m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
             rumbleWhenReady(m_shooter::readyToShoot)
@@ -226,7 +290,7 @@ public class RobotContainer {
     // moment the trigger is pulled so the mode can't flip mid-hold at the range
     // boundary; release and re-pull to re-decide. "aim/auto mode" on the dashboard
     // shows live which mode a pull would pick.
-    m_controller.rightTrigger().whileTrue(
+    m_controller.rightTrigger().and(teleop).whileTrue(
         Commands.either(
             Commands.parallel(
                 m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
@@ -249,7 +313,7 @@ public class RobotContainer {
         )
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
-    m_controller.y().whileTrue(
+    m_controller.y().and(teleop).whileTrue(
         Commands.runEnd(
             () -> {
               m_shooter.setState(PivotState.SHOT_BLOCK);
@@ -265,25 +329,25 @@ public class RobotContainer {
     // Smart pass: heading-locks to the alliance-zone corner on the robot's current side
     // of the field, spins to the distance-interpolated ferry speed, and feeds once
     // actually spun up + aimed (2 s force-feed backstop).
-    m_controller.povUp().whileTrue(
+    m_controller.povUp().and(teleop).whileTrue(
         Commands.parallel(
             m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity),
             heldPassCommand()
         )
     );
     // Manual flat-out ferry kept as a fallback (fixed 90 RPS, no aim assist).
-    m_controller.povRight().whileTrue(
+    m_controller.povRight().and(teleop).whileTrue(
         heldShotCommand(PivotState.LOB, ShooterState.SEND)
     );
 
     // Clear jam: reverse flywheel and indexer to back out a stuck ball.
     // Hold the button until the jam clears, then release.
-    m_controller.b().whileTrue(m_shooter.clearJamCommand());
+    m_controller.b().and(teleop).whileTrue(m_shooter.clearJamCommand());
 
     // X-lock defense brake: hold X to lock the wheels into an X so the robot can't be
     // shoved off its spot. Release to drive normally again. (X was freed up when agitate
     // became automatic during shots.)
-    m_controller.x().whileTrue(m_drivetrain.applyRequest(() -> brakeRequest));
+    m_controller.x().and(teleop).whileTrue(m_drivetrain.applyRequest(() -> brakeRequest));
 
     // === Simulation pose setter (dashboard button) ===
     // Edit Sim/PoseX, Sim/PoseY, Sim/PoseHeadingDeg on the dashboard, then click
@@ -427,12 +491,12 @@ public class RobotContainer {
   // shot command keep running alongside it without cancelling anything. The pinion is
   // left deployed wherever the pump ends; the bumpers still own stow/deploy.
   private Command lintakePumpCommand() {
-    return Commands.sequence(
+    return Commands.waitSeconds(1).andThen((Commands.sequence(
         Commands.runOnce(() -> m_lintake.setPinionState(PinionState.AGITATE)),
         Commands.waitSeconds(0.3),
         Commands.runOnce(() -> m_lintake.setPinionState(PinionState.GROUND)),
         Commands.waitSeconds(0.3)
-    ).repeatedly();
+    )).repeatedly());
   }
 
   // === Timed shot (autonomous) ===
@@ -448,8 +512,53 @@ public class RobotContainer {
             Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
             Commands.run(this::feed, m_shooter).withTimeout(feedSeconds)
         ),
-        lintakePumpCommand()
+        lintakePumpCommand(),
+        m_drivetrain.faceHubCommand(() -> 0.0, () -> 0.0)
     ).finallyDo(interrupted -> stopShooter());
+  }
+
+  private Rotation2d autoTravelHeading(Rotation2d blueHeading) {
+    return DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue)
+        == DriverStation.Alliance.Red
+        ? FlippingUtil.flipFieldRotation(blueHeading) : blueHeading;
+  }
+
+  private boolean readyForAutoTravel(Rotation2d heading) {
+    return m_shooter.isStowedForTravel()
+        && Math.abs(m_drivetrain.getState().Pose.getRotation()
+            .minus(heading).getDegrees()) <= 4.0
+        && Math.abs(m_drivetrain.getState().Speeds.omegaRadiansPerSecond)
+            <= AutoTiming.MAX_TRAVEL_ANGULAR_SPEED_RAD_PER_SEC;
+  }
+
+  /** Stow and align before moving; a failed clearance check aborts the remaining routine. */
+  private Command autoTravelCommand(double timeoutSeconds) {
+    return autoTravelCommand(timeoutSeconds, Rotation2d.k180deg);
+  }
+
+  private Command autoTravelCommand(double timeoutSeconds, Rotation2d blueHeading) {
+    // Hold the selected start heading (+90 left / -90 right for Eclipse), or the
+    // cycle-two wall-side reposition heading (-90 left / +90 right). Alliance
+    // flipping and operator-perspective conversion happen exactly once below.
+    return Commands.sequence(
+        Commands.runOnce(() -> {
+          stopShooter();
+          m_lintake.setPinionState(PinionState.GROUND);
+        }, m_shooter, m_lintake),
+        Commands.deadline(
+            Commands.waitUntil(() -> readyForAutoTravel(autoTravelHeading(blueHeading)))
+                .withTimeout(timeoutSeconds),
+            m_drivetrain.applyRequest(() -> m_autoTravelRequest
+                .withVelocityX(0).withVelocityY(0)
+                .withTargetDirection(m_drivetrain.fieldToOperatorBearing(autoTravelHeading(blueHeading))))),
+        Commands.runOnce(() -> {
+          m_autoTravelReady = readyForAutoTravel(autoTravelHeading(blueHeading));
+          if (!m_autoTravelReady) {
+            SmartDashboard.putString("Auto/Status", "Stopped: shooter not stowed or heading not aligned");
+            DriverStation.reportWarning("Auto stopped: travel clearance/alignment timed out", false);
+          }
+        })
+    );
   }
 
   // === Held shot (teleop) ===
@@ -457,14 +566,18 @@ public class RobotContainer {
   // released by the driver (no withTimeout on feed). Still uses readyToShoot/timeout so
   // the shot can't hang mid-spin.
   private Command heldShotCommand(PivotState pivotState, ShooterState shooterState) {
-    return Commands.deadline(
+    return Commands.runOnce(()->m_lintake.setState(RollerState.AGITATE)).andThen(Commands.deadline(
         Commands.sequence(
             prepareShotCommand(pivotState, shooterState),
             Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
             Commands.run(this::feed, m_shooter)
         ),
         lintakePumpCommand()
-    ).finallyDo(interrupted -> stopShooter());
+    )).finallyDo(interrupted -> {
+      stopShooter();
+      m_lintake.setPinionState(PinionState.GROUND);
+      m_lintake.setState(RollerState.ZERO);
+    });
   }
 
   // === Held pass (teleop) ===
@@ -542,19 +655,13 @@ public class RobotContainer {
     return -m_controller.getRightX() * Constants.kMaxAngularRate;
   }
 
-  // Which power budget the robot wants right now, for the PowerManager. Aiming/shooting ->
-  // flywheel priority (SCORING); hard translation with no aim -> drive priority (SPRINT);
-  // autonomous -> both healthy (AUTO); otherwise the static-default IDLE budget. The
-  // PowerManager stability-filters this, so brief stick excursions past the sprint threshold
-  // don't churn current-limit configs.
+  // Optional flywheel budget selection; the separate drive policy always restores
+  // 40 A supply outside auto. Stability filtering prevents config writes on stick jitter.
   private PowerMode desiredPowerMode() {
     if (DriverStation.isAutonomousEnabled()) {
       return PowerMode.AUTO;
     }
-    boolean aiming = m_controller.rightTrigger().getAsBoolean()
-        || m_controller.a().getAsBoolean()
-        || m_controller.povUp().getAsBoolean();
-    if (aiming) {
+    if (m_aimHeld.getAsBoolean()) {
       return PowerMode.SCORING;
     }
     double stickMagnitude = Math.hypot(m_controller.getLeftX(), m_controller.getLeftY());
@@ -565,6 +672,35 @@ public class RobotContainer {
   }
 
   public Command getAutonomousCommand() {
-    return autoSelection.getSelected();
+    Command selected = autoSelection.getSelected();
+    if (selected == null) {
+      selected = Commands.none();
+    }
+    // WPILib commands may be composed only once. Cache the wrapper so repeated practice
+    // enables of the same chooser option do not throw an "already composed" exception.
+    return m_guardedAutos.computeIfAbsent(selected, this::guardAutonomousCommand);
+  }
+
+  private Command guardAutonomousCommand(Command selected) {
+    return AutoTiming.guard(selected, () -> m_autoTravelReady, () -> {
+          m_autoTravelReady = true;
+          m_autoTimer.restart();
+          SmartDashboard.putString("Auto/Status", "Running");
+        }, this::stopAutoOutputs)
+        // Keep control of the drive after finishing; stick positions must not move it in auto.
+        .andThen(m_drivetrain.applyRequest(() -> brakeRequest))
+        .finallyDo(interrupted -> stopAutoOutputs());
+  }
+
+  private void stopAutoOutputs() {
+    if (m_autoTimer.isRunning() && m_autoTravelReady) {
+      SmartDashboard.putString("Auto/Status", m_autoTimer.hasElapsed(AutoTiming.DURATION_SECONDS)
+          ? "Stopped at autonomous time limit" : "Complete");
+    }
+    stopShooter();
+    m_lintake.setState(RollerState.ZERO);
+    m_lintake.setPinionState(PinionState.GROUND);
+    m_drivetrain.setControl(brakeRequest);
+    m_autoTimer.stop();
   }
 }

@@ -116,6 +116,12 @@ public class Lintake extends SubsystemBase {
     public Command setState(PinionState pinionState) {
         return runOnce(() -> setPinionState(pinionState));
     }
+    public Command zero(){
+        return runOnce(()->{
+            this.m_leaderPinionMotor.setPosition(0);
+            this.m_followerPinionMotor.setPosition(0);
+        });
+    }
 
     /** Imperative pinion setter for use inside command lambdas (the Command-returning
      *  overload above is a no-op if its result isn't scheduled). */
@@ -164,16 +170,24 @@ public class Lintake extends SubsystemBase {
         m_leaderPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
         m_followerPinionMotor.setControl(m_positionRequest.withPosition(m_pinionState.position));
 
-        SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
-        SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
-        SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
-        SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
-        double leaderPos = m_leaderPinionMotor.getPosition().getValueAsDouble();
-        SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, leaderPos);
-        SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
-        // The signal you tune against: target minus actual (motor rotations). Watch this while
-        // editing the knobs -- want it to reach ~0 quickly with no overshoot and no ringing.
-        SmartDashboard.putNumber("LintakeTuning/PinionErrorRot", m_pinionState.position - leaderPos);
+        // Dashboard diagnostics at 10 Hz (every 5th loop) -- publishing at the full 50 Hz
+        // was part of the CommandScheduler loop-overrun budget problem, and none of these
+        // are control inputs.
+        if (++m_diagLoopCount % 5 == 0) {
+            SmartDashboard.putNumber(LintakeConstants.kRollerVoltageKey, m_rollerMotor.getMotorVoltage().getValueAsDouble());
+            SmartDashboard.putString(LintakeConstants.kPinionStateKey, m_pinionState.toString());
+            SmartDashboard.putString(LintakeConstants.kRollerStateKey, m_rollerState.toString());
+            SmartDashboard.putNumber(LintakeConstants.kPinionPositionTargetKey, m_pinionState.position);
+            double leaderPos = m_leaderPinionMotor.getPosition().getValueAsDouble();
+            SmartDashboard.putNumber(LintakeConstants.kLeaderPinionPositionKey, leaderPos);
+            SmartDashboard.putNumber(LintakeConstants.kFollowerPinionPositionKey, m_followerPinionMotor.getPosition().getValueAsDouble());
+            // The signal you tune against: target minus actual (motor rotations). Watch this while
+            // editing the knobs -- want it to reach ~0 quickly with no overshoot and no ringing.
+            SmartDashboard.putNumber("LintakeTuning/PinionErrorRot", m_pinionState.position - leaderPos);
+        }
     }
+
+    // Diagnostic decimation counter -- see the dashboard block in periodic().
+    private int m_diagLoopCount = 0;
     
 }

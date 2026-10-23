@@ -7,62 +7,43 @@
         {
           "type": "named",
           "data": {
-            "name": "intake deploy"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
-            "name": "intake run"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_PASS_PRELOAD_STARTING_TO_RIGHT_PASS_FAR_MID_FIELD"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_PASS_FAR_MID_FIELD_TO_RIGHT_PASS_NEAR_MID_FIELD"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_PASS_NEAR_MID_FIELD_TO_RIGHT_TRENCH_RETURN"
-          }
-        },
-        {
-          "type": "path",
-          "data": {
-            "pathName": "BLUE_RIGHT_TRENCH_RETURN_TO_RIGHT_SCORE"
-          }
-        },
-        {
-          "type": "race",
-          "data": {
-            "commands": [
-              {
-                "type": "named",
-                "data": {
-                  "name": "dump"
-                }
-              },
-              {
-                "type": "wait",
-                "data": {
-                  "waitTime": 4.0
-                }
-              }
-            ]
+            "name": "auto start right"
           }
         },
         {
           "type": "named",
           "data": {
             "name": "intake stop"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_RIGHT_START_TO_FUEL"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_RIGHT_SINGLE_COLLECT_TO_SCORE"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "dump"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "stopshoot"
           }
         }
       ]

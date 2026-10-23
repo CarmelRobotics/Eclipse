@@ -78,6 +78,9 @@ dependencies {
 test {
     useJUnitPlatform()
     systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+    // Autonomous tests load these deployed files at runtime. Changes must invalidate
+    // Gradle's test cache even when no Java source changed.
+    inputs.dir('src/main/deploy/pathplanner')
 }
 
 // Simulation configuration (e.g. environment variables).

@@ -24,9 +24,9 @@ public final class LintakeConstants {
         private static final double kA = 0.01;
         private static final double kD = 0.15;
         private static final double kI = 0;
-        private static final double kP = 1.25;
+        private static final double kP = 8;
         private static final double kS = 0;
-        private static final double kV = 0.25;
+        private static final double kV = 0.125;
 
         private static final double kMotionMagicCruiseVelocity = 55;
         private static final double kMotionMagicAcceleration = 135;
@@ -82,12 +82,14 @@ public final class LintakeConstants {
         .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive));
 
     public static final TalonFXConfiguration RollerConfig = new TalonFXConfiguration()
-        .withSlot0(RollerConfigs.Slot0Configs).withCurrentLimits(kRollerCurrentLimits);
+        .withSlot0(RollerConfigs.Slot0Configs).withCurrentLimits(kRollerCurrentLimits)
+        // Reverse the roller only; keep state voltages and extension motors unchanged.
+        .withMotorOutput(new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive));
 
     public enum PinionState {
         STOW(0),
         AGITATE(-4.5),
-        GROUND(-9.45);
+        GROUND(-9.8);
 
         public final double position;
 
@@ -99,7 +101,8 @@ public final class LintakeConstants {
     public enum RollerState {
         ZERO(0),
         EJECT(-12),
-        INTAKE(-7);
+        INTAKE(-8.25),
+        AGITATE(-5);
 
         public final double volts;
 

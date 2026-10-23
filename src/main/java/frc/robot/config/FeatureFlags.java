@@ -39,10 +39,10 @@ public final class FeatureFlags {
   /** Indexer closed-loop velocity control (steady feed cadence under load). Off = legacy
    *  open-loop voltage. Kept as a flag so shot consistency can be A/B'd directly at the field. */
   public static final BooleanSupplier INDEXER_VELOCITY_CONTROL =
-      FeatureFlag.of("IndexerVelocityControl", true);
+      FeatureFlag.of("IndexerVelocityControl", false);
 
   /** Trench/tower driver assists. Off = fully manual driving everywhere. */
-  public static final BooleanSupplier DRIVER_ASSISTS = FeatureFlag.of("DriverAssists", true);
+  public static final BooleanSupplier DRIVER_ASSISTS = FeatureFlag.of("DriverAssists", false);
 
   /** Dynamic current budgeting. Off = the static compiled current limits (IDLE mode). Starts
    *  OFF: it re-allocates current limits at runtime and hasn't been field-validated -- flip it

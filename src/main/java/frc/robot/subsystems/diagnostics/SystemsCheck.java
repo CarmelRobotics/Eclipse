@@ -86,9 +86,19 @@ public class SystemsCheck extends SubsystemBase {
         // arrives after boot -- better a momentary false-down at startup than a false-up.
     }
 
+    // Fault-monitor decimation: connectivity doesn't change at 50 Hz, and the monitor
+    // builds ~15 "Faults/<name>" strings + NT writes per pass -- running it every loop
+    // was contributing to the CommandScheduler loop overruns. 2 Hz still catches a
+    // dropped device in half a second. NOTE: the camera heartbeat staleness window
+    // (kHeartbeatStaleSeconds = 1.0 s) stays comfortably above the 0.5 s sample period.
+    private int m_monitorLoopCount = 0;
+
     @Override
     public void periodic() {
         // --- Continuous fault monitor (no motion, no rumble) ---
+        if (++m_monitorLoopCount % 25 != 0) {
+            return;
+        }
         int faultCount = 0;
         StringBuilder offline = new StringBuilder();
         for (Map.Entry<String, ParentDevice> entry : m_devices.entrySet()) {

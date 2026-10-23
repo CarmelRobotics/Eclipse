@@ -2,10 +2,13 @@ package frc.robot.subsystems.power;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
@@ -24,10 +27,9 @@ import frc.robot.subsystems.shooter.Shooter;
  * mode actually changes (with a short stability filter so stick jitter can't spam config
  * writes).
  *
- * <p><b>Safety:</b> gated by {@link FeatureFlags#POWER_MANAGER}. When the flag is off the mode
- * is pinned to {@code IDLE}, whose limits equal the compiled static defaults -- so disabling
- * the flag (its default state) restores exactly the known-good static behavior, and enabling
- * it is a deliberate, reversible field decision.
+ * <p>The team-requested drive policy is separate from the optional flywheel budgets:
+ * 91 A supply only in enabled autonomous, 40 A otherwise, reduced to 40 A below 8 V.
+ * Flywheel budget changes remain gated by {@link FeatureFlags#POWER_MANAGER}.
  */
 public class PowerManager extends SubsystemBase {
   // How many consecutive loops the desired mode must hold before we re-apply, so a stick
@@ -38,9 +40,16 @@ public class PowerManager extends SubsystemBase {
   private final Shooter m_shooter;
   private final Supplier<PowerMode> m_desiredMode;
   private final ExecutorService m_executor = Executors.newSingleThreadExecutor();
+  private final DriveCurrentPolicy m_drivePolicy = new DriveCurrentPolicy();
+  private final AtomicBoolean m_updateScheduled = new AtomicBoolean();
+  private volatile double m_requestedDrive = DriveCurrentPolicy.NORMAL_SUPPLY_AMPS;
+  private volatile double m_requestedFlywheel = PowerMode.IDLE.flywheelSupplyCurrent;
+  private volatile boolean m_driveApplied;
+  private boolean m_limitsRequested;
 
   private PowerMode m_candidate = PowerMode.IDLE;
   private int m_stableCount = 0;
+  private int m_diagLoopCount = 0;  // decimates the Desired-mode dashboard write to 10 Hz
   private PowerMode m_applied = null;  // null so the first resolved mode always applies once
 
   public PowerManager(
@@ -52,11 +61,13 @@ public class PowerManager extends SubsystemBase {
 
   @Override
   public void periodic() {
-    // Flag off -> pin IDLE (= static defaults), so turning the feature off always restores
-    // the known-good limits rather than freezing at whatever mode was last applied.
+    // The flag controls optional flywheel reallocation, not the auto-only drive policy.
     PowerMode desired =
         FeatureFlags.POWER_MANAGER.getAsBoolean() ? m_desiredMode.get() : PowerMode.IDLE;
-    SmartDashboard.putString("PowerManager/Desired", desired.toString());
+    // 10 Hz diagnostic (every 5th loop); the mode logic below still runs every loop.
+    if (++m_diagLoopCount % 5 == 0) {
+      SmartDashboard.putString("PowerManager/Desired", desired.toString());
+    }
 
     // Stability filter: only a mode that has held for kStabilityLoops is eligible to apply.
     if (desired == m_candidate) {
@@ -66,21 +77,42 @@ public class PowerManager extends SubsystemBase {
       m_stableCount = 0;
     }
 
-    if (m_candidate == m_applied || m_stableCount < kStabilityLoops) {
+    double driveAmps = m_drivePolicy.resolve(DriverStation.isAutonomousEnabled(),
+        RobotController.getBatteryVoltage(), Timer.getFPGATimestamp());
+    boolean driveChanged = !m_limitsRequested || driveAmps != m_requestedDrive;
+    boolean flywheelChanged = m_candidate != m_applied && m_stableCount >= kStabilityLoops;
+    boolean retryDrive = !m_driveApplied && m_diagLoopCount % 25 == 0;
+    if (!driveChanged && !flywheelChanged && !retryDrive) {
       return;
     }
-    m_applied = m_candidate;
-    SmartDashboard.putString("PowerManager/Applied", m_applied.toString());
-    DogLog.log("PowerManager/Mode", m_applied.toString());
-    DogLog.log("PowerManager/DriveSupplyA", m_applied.driveSupplyCurrent);
-    DogLog.log("PowerManager/FlywheelSupplyA", m_applied.flywheelSupplyCurrent);
+    if (flywheelChanged) m_applied = m_candidate;
+    m_requestedDrive = driveAmps;
+    m_requestedFlywheel = m_applied == null ? PowerMode.IDLE.flywheelSupplyCurrent
+        : m_applied.flywheelSupplyCurrent;
+    m_limitsRequested = true;
+    SmartDashboard.putString("PowerManager/Applied", m_applied == null ? "IDLE" : m_applied.toString());
+    SmartDashboard.putNumber("PowerManager/DriveSupplyA", m_requestedDrive);
+    SmartDashboard.putNumber("PowerManager/FlywheelSupplyA", m_requestedFlywheel);
+    requestUpdate();
+  }
 
-    final double driveAmps = m_applied.driveSupplyCurrent;
-    final double flywheelAmps = m_applied.flywheelSupplyCurrent;
-    m_executor.execute(
-        () -> {
-          m_drivetrain.applyDriveSupplyCurrentLimit(driveAmps);
-          m_shooter.applyFlywheelSupplyCurrentLimit(flywheelAmps);
-        });
+  private void requestUpdate() {
+    if (!m_updateScheduled.compareAndSet(false, true)) return;
+    m_executor.execute(() -> {
+      double drive = m_requestedDrive;
+      double flywheel = m_requestedFlywheel;
+      try {
+        // Coalesce pending changes; a queued auto request must not restore 91 A in teleop.
+        m_driveApplied = m_drivetrain.applyDriveSupplyCurrentLimit(drive);
+        SmartDashboard.putBoolean("PowerManager/DriveLimitsApplied", m_driveApplied);
+        m_shooter.applyFlywheelSupplyCurrentLimit(flywheel);
+      } catch (RuntimeException error) {
+        m_driveApplied = false;
+        DriverStation.reportError("Current-limit update failed: " + error.getMessage(), false);
+      } finally {
+        m_updateScheduled.set(false);
+        if (drive != m_requestedDrive || flywheel != m_requestedFlywheel) requestUpdate();
+      }
+    });
   }
 }

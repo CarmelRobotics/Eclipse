@@ -237,8 +237,8 @@ public final class ShooterConstants {
         // +0.02 over the re-anchored curve, so +0.02 is baked straight in. Entries past
         // ~3 m sit above the 25 deg LOB feed limit -- that's fine for SCORE shots on this
         // mechanism (25 deg is a feed limit, not a travel limit, and these fed fine).
-        ScorePivotPositionByDistance.put(1.5, 0.046);
-        ScorePivotPositionByDistance.put(2.5, 0.065);
+        ScorePivotPositionByDistance.put(1.5, 0.04);
+        ScorePivotPositionByDistance.put(2.5, 0.055);
         ScorePivotPositionByDistance.put(3.5, 0.076);
         ScorePivotPositionByDistance.put(4.5, 0.083);
         ScorePivotPositionByDistance.put(5.0, 0.086);  // table must cover the 5 m range gate
@@ -254,7 +254,7 @@ public final class ShooterConstants {
         // working at all tested distances) baked in flat.
         ScoreShooterRpsByDistance.put(1.5, 39.0);
         ScoreShooterRpsByDistance.put(2.5, 41.5);
-        ScoreShooterRpsByDistance.put(3.5, 45.5);
+        ScoreShooterRpsByDistance.put(3.5, 46.5);
         ScoreShooterRpsByDistance.put(4.5, 49.0);
         ScoreShooterRpsByDistance.put(5.0, 51.0);
 
@@ -326,7 +326,7 @@ public final class ShooterConstants {
         // overcome friction). 0.15 is a conservative starting estimate -- run SysId to
         // ground kS/kV/kA in real data. kP raised 0.125 -> 0.3 to fight the velocity dip
         // when a ball passes through harder; tune it up toward the edge of oscillation
-        // using the DogLog Shooter/RpsError trace. kD intentionally left 0: on a velocity
+        // watching ShotTuning/RpsError live. kD intentionally left 0: on a velocity
         // loop it differentiates an already-noisy signal and usually hurts more than helps.
         private static final double kS = 0.15;
         private static final double kV = .125;
@@ -409,7 +409,7 @@ public final class ShooterConstants {
     public enum IndexerState {
         ZERO(0),
         SCORE(kIndexerScoreVolts),
-        REVERSE(4.5);  // Back out a jammed ball toward the intake
+        REVERSE(8.5);  // Back out a jammed ball toward the intake
 
         public final double volts;
 

@@ -3,13 +3,13 @@
   "waypoints": [
     {
       "anchor": {
-        "x": 8.3,
-        "y": 4.0
+        "x": 5.849181494657622,
+        "y": 7.3
       },
       "prevControl": null,
       "nextControl": {
-        "x": 7.5848343463967804,
-        "y": 4.0
+        "x": 5.134015841054402,
+        "y": 7.3
       },
       "isLocked": false,
       "linkedName": "BLUE_LEFT_PASS_FAR_MID_FIELD"
@@ -33,8 +33,8 @@
   "pointTowardsZones": [],
   "eventMarkers": [],
   "globalConstraints": {
-    "maxVelocity": 4.96,
-    "maxAcceleration": 10.0,
+    "maxVelocity": 3.0,
+    "maxAcceleration": 3.0,
     "maxAngularVelocity": 540.0,
     "maxAngularAcceleration": 720.0,
     "nominalVoltage": 12.0,
@@ -48,7 +48,7 @@
   "folder": null,
   "idealStartingState": {
     "velocity": 0,
-    "rotation": 159.1581046553369
+    "rotation": 91.8623517249953
   },
   "useDefaultConstraints": true
 }

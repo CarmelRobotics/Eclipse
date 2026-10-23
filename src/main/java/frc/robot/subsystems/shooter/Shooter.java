@@ -10,7 +10,6 @@ import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 
-import dev.doglog.DogLog;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -99,7 +98,7 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_indexerCurrentTimeout = new LoggedTunableNumber(ShooterConstants.kIndexerCurrentTimeoutKey, 0.2);
 
     // ===== Flywheel Tuning =====
-    // Live gains: change these on the dashboard against the DogLog RpsError trace, find
+    // Live gains: change these on the dashboard against ShotTuning/RpsError, find
     // the stiffest gains without ringing recovery, then paste winners into ShooterConstants.
     // The gain profile is re-applied *only* when a value actually changes so we're not
     // hammering the CAN bus with redundant config writes.
@@ -398,6 +397,18 @@ public class Shooter extends SubsystemBase {
         return sum / 4;
     }
 
+    /** Both pivot encoders must confirm the low travel position before an autonomous path starts. */
+    public boolean isStowedForTravel() {
+        var leader = m_leaderPivotMotor.getPosition();
+        var follower = m_followerPivotMotor.getPosition();
+        double leaderRot = leader.getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        double followerRot = follower.getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+        return leader.getStatus().isOK() && follower.getStatus().isOK()
+            && Double.isFinite(leaderRot) && Double.isFinite(followerRot)
+            && Math.abs(leaderRot - ShooterConstants.kStowPivotPosition) <= 0.008
+            && Math.abs(followerRot - ShooterConstants.kStowPivotPosition) <= 0.008;
+    }
+
     public boolean readyToShoot() {
         boolean shotInRange = m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters;
         boolean aimed = Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
@@ -410,15 +421,12 @@ public class Shooter extends SubsystemBase {
 
         // Published individually so a stuck shot can be diagnosed from the dashboard
         // instead of just seeing the combined "ready to shoot" go false.
-        SmartDashboard.putBoolean("ready/shot in range", shotInRange);
-        SmartDashboard.putBoolean("ready/aimed", aimed);
-        SmartDashboard.putBoolean("ready/shooter at speed", shooterReady);
-        SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
-
-        DogLog.log("Shooter/Ready/ShotInRange", shotInRange);
-        DogLog.log("Shooter/Ready/Aimed", aimed);
-        DogLog.log("Shooter/Ready/ShooterAtSpeed", shooterReady);
-        DogLog.log("Shooter/Ready/PivotInPosition", pivotReady);
+        if (diagLoop()) {
+            SmartDashboard.putBoolean("ready/shot in range", shotInRange);
+            SmartDashboard.putBoolean("ready/aimed", aimed);
+            SmartDashboard.putBoolean("ready/shooter at speed", shooterReady);
+            SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
+        }
 
         return shotInRange && aimed && shooterReady && pivotReady;
     }
@@ -436,18 +444,29 @@ public class Shooter extends SubsystemBase {
         boolean aimed = Math.abs(m_drive.getPassHeadingError().getDegrees())
             <= ShooterConstants.kPassHeadingToleranceDegrees;
 
-        SmartDashboard.putBoolean("ready/pass spun up", spunUp);
-        SmartDashboard.putBoolean("ready/pass aimed", aimed);
-        SmartDashboard.putBoolean("ready/pass pivot", pivotReady);
-        DogLog.log("Shooter/Ready/PassSpunUp", spunUp);
-        DogLog.log("Shooter/Ready/PassAimed", aimed);
-        DogLog.log("Shooter/Ready/PassPivot", pivotReady);
+        if (diagLoop()) {
+            SmartDashboard.putBoolean("ready/pass spun up", spunUp);
+            SmartDashboard.putBoolean("ready/pass aimed", aimed);
+            SmartDashboard.putBoolean("ready/pass pivot", pivotReady);
+        }
 
         return spunUp && pivotReady && aimed;
     }
 
+    // Diagnostic decimation: dashboard publishing runs at 10 Hz (every 5th loop). The
+    // counter only advances in periodic(); readyToShoot()/readyToPass() read diagLoop()
+    // without advancing it, so however many times commands poll them in a loop, the
+    // publish cadence stays fixed.
+    private int m_diagLoopCount = 0;
+
+    private boolean diagLoop() {
+        return m_diagLoopCount % 5 == 0;
+    }
+
     @Override
     public void periodic() {
+        m_diagLoopCount++;
+
         // === Update shot targets from drivetrain compensation ===
         // The drivetrain computes motion-compensated distance and heading each loop;
         // we interpolate the shot table to get the pivot and RPS for that distance, then
@@ -477,13 +496,18 @@ public class Shooter extends SubsystemBase {
 
         // === Readiness diagnostics ===
         // readyToShoot() is an AND of four independent gates; each is published so the
-        // driver can see which gate is holding up the shot without guessing.
+        // driver can see which gate is holding up the shot without guessing. Publishing is
+        // decimated to 10 Hz (same reasoning as the drivetrain: ~15 string-keyed NT writes
+        // per loop here were feeding the CommandScheduler loop overruns); readyToShoot()
+        // itself still runs every loop -- commands gate on its return value.
         boolean ready = readyToShoot();
-        SmartDashboard.putNumber("shot compensated distance", shotDistance);
-        SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
-        SmartDashboard.putNumber("interpolated pivot position", m_targetPivotPosition);
-        SmartDashboard.putNumber("interpolated shooter rps", m_targetShooterRps);
-        SmartDashboard.putBoolean("ready to shoot", ready);
+        if (diagLoop()) {
+            SmartDashboard.putNumber("shot compensated distance", shotDistance);
+            SmartDashboard.putNumber("shot time of flight", m_drive.getShotTimeOfFlightSeconds());
+            SmartDashboard.putNumber("interpolated pivot position", m_targetPivotPosition);
+            SmartDashboard.putNumber("interpolated shooter rps", m_targetShooterRps);
+            SmartDashboard.putBoolean("ready to shoot", ready);
+        }
 
         // === Pivot position control ===
         // The switch drives the pivot to the target for the current state (STOW, SCORE,
@@ -540,10 +564,6 @@ public class Shooter extends SubsystemBase {
             m_shotArmed = false;
             m_inDip = false;
         }
-        DogLog.log("Shooter/CommandedRps", commandedRps);
-        DogLog.log("Shooter/ShotCount", m_shotCount);
-        DogLog.log("Shooter/BallInFlywheel", m_inDip);
-
         // === Indexer control ===
         // Velocity-controlled (flag on) for a load-independent feed cadence, or the legacy
         // open-loop voltage (flag off) as the A/B fallback. Live gain re-apply mirrors the
@@ -650,25 +670,15 @@ public class Shooter extends SubsystemBase {
         } else {
             m_indexerOvercurrentStartTime = 0;
         }
-        SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
-        SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
+        if (diagLoop()) {
+            SmartDashboard.putNumber(ShooterConstants.kShooterTargetPositionKey, m_positionRequest.Position);
+            SmartDashboard.putNumber("Actual shooter speed", this.m_leftLeaderShooterMotor.getVelocity().getValueAsDouble());
 
-        // --- DogLog shot-tuning telemetry (persisted to WPILOG + live on NetworkTables) ---
-        DogLog.log("Shooter/ShotDistanceM", shotDistance);
-        DogLog.log("Shooter/HubHeadingErrorDeg", m_drive.getHubHeadingError().getDegrees());
-        DogLog.log("Shooter/TargetPivotRot", m_targetPivotPosition);
-        DogLog.log("Shooter/ActualPivotRot", pivotOutputRot);
-        DogLog.log("Shooter/TargetRps", m_targetShooterRps);
-        DogLog.log("Shooter/ActualRps", actualRps);
-        DogLog.log("Shooter/RpsError", commandedRps - actualRps);
-        DogLog.log("Shooter/ReadyToShoot", ready);
-        DogLog.log("Shooter/AvgCurrentA", getAvgShooterCurrentDraw());
-        DogLog.log("Shooter/IndexerCurrentA", indexerCurrent);
-        DogLog.log("Shooter/IndexerVolts", m_indexerState.volts);
-        DogLog.log("Shooter/IndexerRps", m_indexerMotor.getVelocity().getValueAsDouble());
-        DogLog.log("Shooter/PivotState", m_pivotState.toString());
-        DogLog.log("Shooter/ShooterState", m_shooterState.toString());
-        DogLog.log("Shooter/IndexerState", m_indexerState.toString());
+            // The tuning signal the flywheel-gain procedure watches (target vs actual under
+            // load). Was a DogLog/WPILOG trace before DogLog was removed (see Robot.java);
+            // live-only now, at the 10 Hz diagnostic rate.
+            SmartDashboard.putNumber("ShotTuning/RpsError", commandedRps - actualRps);
+        }
     }
 
     /** Number of balls detected leaving the flywheel (via velocity dip) since boot. */
@@ -677,31 +687,19 @@ public class Shooter extends SubsystemBase {
     }
 
     // === Shot-event snapshot ===
-    // One discrete record per detected shot, capturing the whole firing solution PLUS the
-    // live trims in effect at that moment. This is the calibration record: after a field
-    // session, step through Shooter/ShotEvent/Number in AdvantageScope and read each shot's
-    // conditions directly instead of scrubbing continuous traces for the instant a ball
-    // left. The "last shot" dashboard string shows the same at the field, right after the
-    // ball lands -- note where it landed, glance at the string, and the tuning table row
-    // writes itself. Logging the offsets matters most: a shot that landed perfectly with
-    // RpsOffset=+2 means the TABLE is 2 RPS low there; without recording the trim, the
-    // post-session bake-in is guesswork.
+    // One "last shot" record per detected shot, capturing the firing solution PLUS the
+    // live trims in effect at that moment. This is the calibration record: note where the
+    // ball landed, glance at the string, and the tuning table row writes itself. Recording
+    // the offsets matters most: a shot that landed perfectly with RpsOffset=+2 means the
+    // TABLE is 2 RPS low there; without the trim in the record, the post-session bake-in
+    // is guesswork. (Was also a per-shot WPILOG record until DogLog was removed -- see
+    // Robot.java. Live dashboard string only now, so note it down before the next shot
+    // overwrites it.)
     private void logShotEvent(double commandedRps, double actualRps, double shotDistance) {
         // Passes care about the ferry distance, not the hub distance.
         double distance = m_shooterState == ShooterState.PASS ? m_drive.getPassDistance() : shotDistance;
         double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
         double headingErrDeg = m_drive.getHubHeadingError().getDegrees();
-        DogLog.log("Shooter/ShotEvent/Number", m_shotCount);
-        DogLog.log("Shooter/ShotEvent/Mode", m_shooterState.toString());
-        DogLog.log("Shooter/ShotEvent/DistanceM", distance);
-        DogLog.log("Shooter/ShotEvent/CommandedRps", commandedRps);
-        DogLog.log("Shooter/ShotEvent/ActualRps", actualRps);
-        DogLog.log("Shooter/ShotEvent/PivotRot", pivotOutputRot);
-        DogLog.log("Shooter/ShotEvent/HeadingErrorDeg", headingErrDeg);
-        DogLog.log("Shooter/ShotEvent/RpsOffset", m_shooterRpsOffset.get());
-        DogLog.log("Shooter/ShotEvent/PivotOffset", m_pivotOffset.get());
-        DogLog.log("Shooter/ShotEvent/PassRpsOffset", m_passRpsOffset.get());
-        DogLog.log("Shooter/ShotEvent/BatteryVolts", RobotController.getBatteryVoltage());
         SmartDashboard.putString("last shot", String.format(
             "#%d %s %.2f m | rps %.1f | pivot %.3f | hdg %.1f deg | trim rps %+.1f piv %+.3f",
             m_shotCount, m_shooterState, distance, commandedRps, pivotOutputRot,
