@@ -504,7 +504,8 @@ public class Shooter extends SubsystemBase {
     public boolean readyToShoot() {
         boolean manual = isManualShotActive();
         boolean shotInRange = manual || m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters;
-        boolean aimed = manual || Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
+        boolean aimed = manual || !m_drive.isAutoAlignmentEnabled()
+            || Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
         boolean shooterReady = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetShooterRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
         // Convert motor position to output (pivot) rotations using gear ratio
@@ -534,7 +535,7 @@ public class Shooter extends SubsystemBase {
         double currentPivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
         boolean pivotReady = Math.abs(currentPivotOutputRot - m_passPivotPosition.get())
             <= ShooterConstants.kPivotReadyToleranceRotations;
-        boolean aimed = Math.abs(m_drive.getPassHeadingError().getDegrees())
+        boolean aimed = !m_drive.isAutoAlignmentEnabled() || Math.abs(m_drive.getPassHeadingError().getDegrees())
             <= ShooterConstants.kPassHeadingToleranceDegrees;
 
         if (diagLoop()) {

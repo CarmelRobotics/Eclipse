@@ -3,7 +3,22 @@
 All poses remain in **blue-origin field coordinates on both alliances**. Do not change
 the Limelight API to `wpired` or reflect odometry just because the DS reports Red.
 
-## Driver procedure when no auto runs
+## Current competition control: teleop auto-alignment disabled
+
+`Constants.kTeleopAutoAlignEnabled` is compiled **false**. A, right trigger, and POV-up
+do not rotate the chassis toward a hub or pass target; yaw remains on the driver's
+right stick. Dashboard edits cannot re-enable it. Trench/tower assists remain disabled.
+
+Shooting still operates: initialized localization allows distance-based hub/pass targets
+with **MANUAL AIM / AUTO RANGE** displayed. Without initialization, right trigger retains
+the manually aimed 2.75 m preset fallback described below. The teleop heading-readiness
+check is not required for feeding when auto-alignment is disabled; mechanical readiness
+and existing bounded spin-up behavior remain.
+
+**Autonomous path-following rotation, startup alignment, and autonomous shooting heading
+control are unchanged. This does not resolve the reported backwards autonomous launch.**
+
+## Optional pose-based range setup when no auto runs
 
 1. Once placed, point the robot's **+X/front away from your alliance wall**, toward
    midfield. The rear intake is **not** the front for this procedure.
@@ -11,7 +26,8 @@ the Limelight API to `wpired` or reflect odometry just because the DS reports Re
    field heading (Blue 0 degrees / Red 180 degrees), independent of our deliberately
    reversed driver-stick perspective. Never press it in an arbitrary orientation.
 3. Valid stationary camera frames establish X/Y without an auto. Verify
-   `Localization/Ready to aim` is true for automatic aiming. AUTO/MANUAL selection
+   `Localization/Ready to aim` is true for trusted field calculations. Teleop auto-align
+   remains disabled regardless of this value. RANGED/PRESET selection
    latches per right-trigger press; release and press again after initialization to
    switch out of the manual fallback.
 
@@ -42,7 +58,7 @@ this downfield reset during/after an auto unless physically pointing downfield.
   can be set from 1.5 to 5 m **before** pressing the trigger. Range and existing pivot/RPS
   trims snapshot at the press and stay unchanged for that hold. This is not automatic
   range estimation: the driver must aim and shoot from the selected approximate range.
-- `Shooter/ControlMode` explicitly shows AUTO HUB/PASS versus MANUAL PRESET; `aim/auto mode`
+- `Shooter/ControlMode` explicitly shows MANUAL AIM / AUTO RANGE versus MANUAL PRESET; `aim/auto mode`
   also reports MANUAL PRESET when unlocalized. A manual shot starts spinning immediately,
   then follows the existing readiness-or-1.25-second-timeout feed/recovery sequence.
   Release stops feed and clears manual targets; the normal low-speed idle pre-spin may
@@ -65,7 +81,10 @@ not validation of the physical Limelight or event field.
 The right-trigger regression test constructs the actual RobotContainer, simulates an
 Xbox trigger in teleop with no localization, and checks the native flywheel velocity
 request, indexer feed, release cleanup, fixed-preset latching, and automatic selection
-on a subsequent localized press. No desktop, robot, or camera connection is started.
+of pose-based range on a subsequent localized press. It also verifies A, right trigger,
+and POV-up preserve joystick yaw without updating a heading-lock target. The localization
+integration test verifies autonomous heading requests still work on both alliances.
+No desktop, robot, or camera connection is started.
 
 **This code cannot repair a wrong field map, physically swapped tag IDs, camera
 mounting calibration, or a different/stale deployed binary.** If the camera keeps

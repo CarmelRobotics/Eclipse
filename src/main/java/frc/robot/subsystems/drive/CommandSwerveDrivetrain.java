@@ -413,6 +413,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     public boolean hasAlliance() { return m_localization.alliance().isPresent(); }
     public boolean isFieldAimingReady() { return m_localization.readyToAim(); }
 
+    public boolean isAutoAlignmentEnabled() {
+        return DriverStation.isAutonomousEnabled() || Constants.kTeleopAutoAlignEnabled;
+    }
+
     public void prepareForMatch() {
         updateAllianceDependentState();
         m_localization.prepareForMatch(getState().Pose, DriverStation.isFMSAttached());
@@ -550,7 +554,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putBoolean("Localization/Ready to aim", isFieldAimingReady());
             SmartDashboard.putString("Localization/Vision status", m_localization.status());
             SmartDashboard.putString("Localization/Aim status", isFieldAimingReady()
-                ? "Ready" : "AUTO AIM BLOCKED; right trigger uses manual preset");
+                ? (isAutoAlignmentEnabled() ? "Ready" : "AUTO-ALIGN DISABLED - manual rotation")
+                : "AUTO AIM BLOCKED; right trigger uses manual preset");
+            SmartDashboard.putBoolean("Drivetrain/Teleop auto-align enabled", Constants.kTeleopAutoAlignEnabled);
             SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
             SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
             SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
@@ -995,7 +1001,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public Command faceHubCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity,
             Supplier<Double> manualRotation) {
-        return applyRequest(() -> isFieldAimingReady() ? snapRequest
+        return applyRequest(() -> isAutoAlignmentEnabled() && isFieldAimingReady() ? snapRequest
             .withVelocityX(xVelocity.get())
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
@@ -1048,7 +1054,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public Command facePassTargetCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity,
             Supplier<Double> manualRotation) {
-        return applyRequest(() -> isFieldAimingReady() ? snapRequest
+        return applyRequest(() -> isAutoAlignmentEnabled() && isFieldAimingReady() ? snapRequest
             .withVelocityX(xVelocity.get())
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)

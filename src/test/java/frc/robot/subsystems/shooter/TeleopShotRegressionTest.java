@@ -6,6 +6,7 @@ import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import edu.wpi.first.hal.AllianceStationID;
 import edu.wpi.first.hal.HAL;
@@ -22,7 +23,9 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import frc.robot.RobotContainer;
+import frc.robot.Constants;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
+import frc.robot.subsystems.localisation.LocalisationConstants;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 import java.lang.reflect.Field;
@@ -31,7 +34,7 @@ import org.junit.jupiter.api.Test;
 
 /** Actual Xbox right-trigger binding and native simulated motor requests; no GUI or network. */
 class TeleopShotRegressionTest {
-  @Test void realRightTriggerSpinsAndFeedsWithoutPoseThenStopsAndAllowsAutomaticNextPress()
+  @Test void rightTriggerStillShootsAndAllTeleopAimButtonsPreserveManualYaw()
       throws Exception {
     assertTrue(HAL.initialize(500, 0));
     SimHooks.resumeTiming();
@@ -46,7 +49,7 @@ class TeleopShotRegressionTest {
     DriverStationSim.setAllianceStationId(AllianceStationID.Red1);
     DriverStationSim.setEnabled(false);
     refresh();
-    NetworkTableInstance.getDefault().getTable("limelight-four").getEntry("botpose_wpiblue")
+    NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name()).getEntry("botpose_wpiblue")
         .setDoubleArray(new double[11]);
     SmartDashboard.putNumber(ManualShotPreset.DISTANCE_KEY, 2.75);
     SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
@@ -91,12 +94,29 @@ class TeleopShotRegressionTest {
       assertEquals(ShooterState.ZERO, field(shooter, "m_shooterState"));
       assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
       controller.setRightTriggerAxis(1);
+      controller.setRightX(.25);
+      var snap = (SwerveRequest.FieldCentricFacingAngle) field(drive, "snapRequest");
+      snap.TargetDirection = Rotation2d.fromDegrees(20);
       tick(scheduler, 6);
       assertTrue(drive.isFieldAimingReady());
-      assertFalse(shooter.isManualShotActive(), "Next trigger press can select localized auto mode");
-      assertEquals("AUTO HUB/PASS", SmartDashboard.getString("Shooter/ControlMode", ""));
+      assertFalse(shooter.isManualShotActive(), "Next press can select pose-based range without auto-align");
+      assertEquals("MANUAL AIM / AUTO RANGE", SmartDashboard.getString("Shooter/ControlMode", ""));
+      verifyManualYaw(drive, snap);
+      controller.setRightTriggerAxis(0);
+      tick(scheduler, 3);
+      controller.setAButton(true);
+      tick(scheduler, 4);
+      verifyManualYaw(drive, snap);
+      controller.setAButton(false);
+      tick(scheduler, 3);
+      controller.setPOV(0);
+      tick(scheduler, 4);
+      verifyManualYaw(drive, snap);
     } finally {
       controller.setRightTriggerAxis(0);
+      controller.setRightX(0);
+      controller.setAButton(false);
+      controller.setPOV(-1);
       scheduler.cancelAll();
       scheduler.getDefaultButtonLoop().clear();
       if (container != null) {
@@ -142,6 +162,17 @@ class TeleopShotRegressionTest {
     Field field = object.getClass().getDeclaredField(name);
     field.setAccessible(true);
     return field.get(object);
+  }
+
+  private static void verifyManualYaw(CommandSwerveDrivetrain drive,
+      SwerveRequest.FieldCentricFacingAngle snap) throws Exception {
+    assertFalse(Constants.kTeleopAutoAlignEnabled);
+    assertFalse(drive.isAutoAlignmentEnabled());
+    var request = (SwerveRequest.FieldCentric) field(drive, "m_unlocalizedDrive");
+    assertEquals(-.25 * Constants.kMaxAngularRate, request.RotationalRate, 1e-9,
+        "A, right trigger, and POV-up must retain the driver's requested yaw");
+    assertEquals(20, snap.TargetDirection.getDegrees(), 1e-9,
+        "Teleop must not update a heading-lock target, even when fully localized");
   }
 
   private static void refresh() {

@@ -333,7 +333,8 @@ public class RobotContainer {
                 && (!FeatureFlags.ZONE_CONTROLLER.getAsBoolean() || m_zoneController.shouldShootHub())
                 && (m_drivetrain.isInAllianceZone() || !FeatureFlags.ALLIANCE_ZONE_GATE.getAsBoolean())
                 && (m_drivetrain.isOurHubActive() || !FeatureFlags.SHIFTS_GATE.getAsBoolean())
-        ).beforeStarting(() -> SmartDashboard.putString("Shooter/ControlMode", "AUTO HUB/PASS")),
+        ).beforeStarting(() -> SmartDashboard.putString("Shooter/ControlMode",
+            Constants.kTeleopAutoAlignEnabled ? "AUTO HUB/PASS" : "MANUAL AIM / AUTO RANGE")),
         manualShotCommand())
         .finallyDo(() -> SmartDashboard.putString("Shooter/ControlMode", "IDLE"))
     );

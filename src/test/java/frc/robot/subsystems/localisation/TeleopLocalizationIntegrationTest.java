@@ -38,7 +38,7 @@ class TeleopLocalizationIntegrationTest {
     DriverStationSim.notifyNewData();
     DriverStation.refreshData();
     SmartDashboard.putBoolean("FeatureFlags/VisionFusion", true);
-    var camera = NetworkTableInstance.getDefault().getTable("limelight-four");
+    var camera = NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name());
     camera.getEntry("botpose_wpiblue").setDoubleArray(new double[11]);
     try (var drive = TunerConstants.createDrivetrain()) {
       var sim = CommandSwerveDrivetrain.class.getDeclaredField("m_simNotifier");
@@ -100,13 +100,21 @@ class TeleopLocalizationIntegrationTest {
   }
 
   private static void publish(CommandSwerveDrivetrain drive, double x, double y, int tags) {
-    NetworkTableInstance.getDefault().getTable("limelight-four").getEntry("botpose_wpiblue")
+    NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name()).getEntry("botpose_wpiblue")
         .setDoubleArray(new double[] {x, y, 0, 0, 0, 0, 20, tags, 1, 2, .5});
     Timer.delay(.045);
     drive.periodic();
   }
 
   private static void verifyAimRequest(CommandSwerveDrivetrain drive) throws Exception {
+    boolean wasEnabled = DriverStation.isEnabled();
+    boolean wasAuto = DriverStation.isAutonomous();
+    DriverStationSim.setAutonomous(true);
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    DriverStation.refreshData();
+    drive.periodic();
+    assertTrue(drive.isAutoAlignmentEnabled(), "Autonomous heading control must remain enabled");
     var command = drive.faceHubCommand(() -> 0.0, () -> 0.0);
     command.initialize();
     command.execute();
@@ -123,5 +131,9 @@ class TeleopLocalizationIntegrationTest {
     assertEquals(0, MathUtil.angleModulus(drive.getHubHeading().getRadians() - rawBearing - trim), .01,
         "Stationary shot bearing must point at our own alliance hub");
     command.end(true);
+    DriverStationSim.setEnabled(wasEnabled);
+    DriverStationSim.setAutonomous(wasAuto);
+    DriverStationSim.notifyNewData();
+    DriverStation.refreshData();
   }
 }
