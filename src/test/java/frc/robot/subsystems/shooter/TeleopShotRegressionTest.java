@@ -3,6 +3,7 @@ package frc.robot.subsystems.shooter;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.ctre.phoenix6.SignalLogger;
+import com.ctre.phoenix6.controls.MotionMagicVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -31,10 +32,14 @@ import frc.robot.subsystems.shooter.ShooterConstants.ShooterState;
 import java.lang.reflect.Field;
 import java.util.concurrent.ExecutorService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /** Actual Xbox right-trigger binding and native simulated motor requests; no GUI or network. */
 class TeleopShotRegressionTest {
-  @Test void rightTriggerStillShootsAndAllTeleopAimButtonsPreserveManualYaw()
+  @ParameterizedTest
+  @EnumSource(value = AllianceStationID.class, names = {"Blue1", "Red1"})
+  void rightTriggerUsesTowerPresetAndAllTeleopAimButtonsPreserveManualYaw(AllianceStationID station)
       throws Exception {
     assertTrue(HAL.initialize(500, 0));
     SimHooks.resumeTiming();
@@ -46,12 +51,13 @@ class TeleopShotRegressionTest {
     DriverStationSim.resetData();
     DriverStationSim.setDsAttached(true);
     DriverStationSim.setFmsAttached(true);
-    DriverStationSim.setAllianceStationId(AllianceStationID.Red1);
+    DriverStationSim.setAllianceStationId(station);
     DriverStationSim.setEnabled(false);
     refresh();
     NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name()).getEntry("botpose_wpiblue")
         .setDoubleArray(new double[11]);
-    SmartDashboard.putNumber(ManualShotPreset.DISTANCE_KEY, 2.75);
+    // An old dashboard value must not override the newly compiled tower range.
+    SmartDashboard.putNumber("ShotTuning/ManualShotDistanceM", 2.75);
     SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
     SmartDashboard.putNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
     var controller = new XboxControllerSim(0);
@@ -59,6 +65,8 @@ class TeleopShotRegressionTest {
     controller.setButtonCount(10);
     controller.setPOVCount(1);
     controller.setRightTriggerAxis(0);
+    controller.setRightX(0);
+    controller.setAButton(false);
     controller.setPOV(-1);
     RobotContainer container = null;
     try {
@@ -67,6 +75,10 @@ class TeleopShotRegressionTest {
       ((Notifier) field(drive, "m_simNotifier")).close();
       var shooter = (Shooter) field(container, "m_shooter");
       var flywheel = (TalonFX) field(shooter, "m_leftLeaderShooterMotor");
+      var pivot = (TalonFX) field(shooter, "m_leaderPivotMotor");
+      var towerDrive = (SwerveRequest.FieldCentric) field(container, "driveRequest");
+      var snap = (SwerveRequest.FieldCentricFacingAngle) field(drive, "snapRequest");
+      snap.TargetDirection = Rotation2d.fromDegrees(20);
       DriverStationSim.setEnabled(true);
       DriverStationSim.setAutonomous(false);
       tick(scheduler, 3);
@@ -74,18 +86,19 @@ class TeleopShotRegressionTest {
       controller.setRightTriggerAxis(1);
       tick(scheduler, 6);
       assertTrue(shooter.isManualShotActive(), "Uninitialized pose must not swallow trigger press");
-      var request = assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl());
-      assertEquals(ShooterConstants.getScoreShooterRps(2.75), request.Velocity, .01);
+      verifyTowerTargets(flywheel, pivot, 0, 0);
       assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"), "Do not feed before spin-up");
-      assertTrue(SmartDashboard.getString("Shooter/ControlMode", "").startsWith("MANUAL"));
+      assertEquals("TOWER PRESET - aim with right stick", SmartDashboard.getString("Shooter/ControlMode", ""));
+      assertEquals("TOWER PRESET", SmartDashboard.getString("aim/auto mode", ""));
       // Acquiring position/heading and editing the dashboard while held must NOT
-      // switch to auto-aim or change this manual shot's already-latched preset.
+      // switch to auto-aim or change the tower shot's already-latched preset/trims.
       drive.resetPose(new Pose2d(14, 2, Rotation2d.k180deg));
-      SmartDashboard.putNumber(ManualShotPreset.DISTANCE_KEY, 4.5);
+      SmartDashboard.putNumber("ShotTuning/ManualShotDistanceM", 4.5);
+      SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, .002);
+      SmartDashboard.putNumber(ShooterConstants.kShooterRpsOffsetKey, 1);
       tick(scheduler, 61);
       assertTrue(shooter.isManualShotActive());
-      assertEquals(ShooterConstants.getScoreShooterRps(2.75),
-          assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
+      verifyTowerTargets(flywheel, pivot, 0, 0);
       assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"),
           "Manual feed must proceed after the existing bounded spin-up wait");
       controller.setRightTriggerAxis(0);
@@ -93,25 +106,49 @@ class TeleopShotRegressionTest {
       assertFalse(shooter.isManualShotActive());
       assertEquals(ShooterState.ZERO, field(shooter, "m_shooterState"));
       assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
+      assertEquals("IDLE", SmartDashboard.getString("Shooter/ControlMode", ""));
+      // Deliberately out of hub range and outside the alliance zone. Even a fully
+      // initialized pose must not change right trigger into a pass or automatic shot.
+      drive.resetPose(new Pose2d(8.27, .25, Rotation2d.k180deg));
       controller.setRightTriggerAxis(1);
       controller.setRightX(.25);
-      var snap = (SwerveRequest.FieldCentricFacingAngle) field(drive, "snapRequest");
-      snap.TargetDirection = Rotation2d.fromDegrees(20);
       tick(scheduler, 6);
       assertTrue(drive.isFieldAimingReady());
-      assertFalse(shooter.isManualShotActive(), "Next press can select pose-based range without auto-align");
-      assertEquals("MANUAL AIM / AUTO RANGE", SmartDashboard.getString("Shooter/ControlMode", ""));
-      verifyManualYaw(drive, snap);
+      assertTrue(drive.getShotDistance() > ShooterConstants.kMaxShotDistanceMeters);
+      assertTrue(shooter.isManualShotActive(), "Localized presses must still use the fixed tower preset");
+      verifyTowerTargets(flywheel, pivot, .002, 1);
+      assertEquals("TOWER PRESET - aim with right stick", SmartDashboard.getString("Shooter/ControlMode", ""));
+      verifyManualYaw(drive, snap, towerDrive);
+      // Mode transition must cancel the teleop shot, including with trigger held.
+      DriverStationSim.setAutonomous(true);
+      tick(scheduler, 3);
+      assertFalse(shooter.isManualShotActive());
+      assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
+      assertTrue(drive.isAutoAlignmentEnabled(), "Autonomous heading control remains enabled");
       controller.setRightTriggerAxis(0);
+      DriverStationSim.setAutonomous(false);
       tick(scheduler, 3);
       controller.setAButton(true);
       tick(scheduler, 4);
-      verifyManualYaw(drive, snap);
+      verifyManualYaw(drive, snap, (SwerveRequest.FieldCentric) field(drive, "m_unlocalizedDrive"));
       controller.setAButton(false);
       tick(scheduler, 3);
       controller.setPOV(0);
       tick(scheduler, 4);
-      verifyManualYaw(drive, snap);
+      verifyManualYaw(drive, snap, (SwerveRequest.FieldCentric) field(drive, "m_unlocalizedDrive"));
+      controller.setPOV(-1);
+      tick(scheduler, 3);
+      controller.setPOV(90);
+      tick(scheduler, 6);
+      assertFalse(shooter.isManualShotActive(), "Separate manual ferry must clear the tower preset");
+      assertEquals(ShooterConstants.kSendShooterRps,
+          assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
+      assertEquals(ShooterConstants.kLobPivotPosition * ShooterConstants.kPivotGearRatio,
+          assertInstanceOf(MotionMagicVoltage.class, pivot.getAppliedControl()).Position, .0001);
+      controller.setPOV(-1);
+      tick(scheduler, 3);
+      assertEquals(ShooterState.ZERO, field(shooter, "m_shooterState"));
+      assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
     } finally {
       controller.setRightTriggerAxis(0);
       controller.setRightX(0);
@@ -137,7 +174,9 @@ class TeleopShotRegressionTest {
         }
       }
       AutoBuilder.resetForTesting();
-      SmartDashboard.putNumber(ManualShotPreset.DISTANCE_KEY, ManualShotPreset.DEFAULT_DISTANCE_METERS);
+      SmartDashboard.putNumber("ShotTuning/ManualShotDistanceM", 2.75);
+      SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
+      SmartDashboard.putNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
       DriverStationSim.resetData();
       refresh();
     }
@@ -158,6 +197,27 @@ class TeleopShotRegressionTest {
     assertEquals(ShooterConstants.kSendShooterRps, excessive.wheelRps(), 1e-9);
   }
 
+  @Test void towerPresetUsesUprightToHubCenterDistanceAndExistingTable() {
+    double drawingDistance = (115.05 + 47.0 / 2) * .0254;
+    assertEquals(drawingDistance, ShooterConstants.kTowerShotDistanceMeters, .001);
+    var preset = ManualShotPreset.tower(0, 0);
+    assertEquals(3.52, preset.distanceMeters(), 1e-9);
+    assertEquals(.07614, preset.pivotRotations(), 1e-9);
+    assertEquals(46.55, preset.wheelRps(), 1e-9);
+    var trimmed = ManualShotPreset.tower(.002, 1);
+    assertEquals(.07814, trimmed.pivotRotations(), 1e-9);
+    assertEquals(47.55, trimmed.wheelRps(), 1e-9);
+  }
+
+  private static void verifyTowerTargets(TalonFX flywheel, TalonFX pivot,
+      double pivotTrim, double rpsTrim) {
+    var expected = ManualShotPreset.tower(pivotTrim, rpsTrim);
+    assertEquals(expected.wheelRps(),
+        assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
+    assertEquals(expected.pivotRotations() * ShooterConstants.kPivotGearRatio,
+        assertInstanceOf(MotionMagicVoltage.class, pivot.getAppliedControl()).Position, .0001);
+  }
+
   private static Object field(Object object, String name) throws Exception {
     Field field = object.getClass().getDeclaredField(name);
     field.setAccessible(true);
@@ -165,10 +225,9 @@ class TeleopShotRegressionTest {
   }
 
   private static void verifyManualYaw(CommandSwerveDrivetrain drive,
-      SwerveRequest.FieldCentricFacingAngle snap) throws Exception {
+      SwerveRequest.FieldCentricFacingAngle snap, SwerveRequest.FieldCentric request) {
     assertFalse(Constants.kTeleopAutoAlignEnabled);
     assertFalse(drive.isAutoAlignmentEnabled());
-    var request = (SwerveRequest.FieldCentric) field(drive, "m_unlocalizedDrive");
     assertEquals(-.25 * Constants.kMaxAngularRate, request.RotationalRate, 1e-9,
         "A, right trigger, and POV-up must retain the driver's requested yaw");
     assertEquals(20, snap.TargetDirection.getDegrees(), 1e-9,

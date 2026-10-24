@@ -74,8 +74,6 @@ public class Shooter extends SubsystemBase {
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
     private double m_targetPassRps = 30;  // distance-interpolated ferry speed
     private ManualShotPreset m_manualShot;
-    private final LoggedTunableNumber m_manualShotDistance = new LoggedTunableNumber(
-        ManualShotPreset.DISTANCE_KEY, ManualShotPreset.DEFAULT_DISTANCE_METERS);
 
     // ===== Protection =====
     // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
@@ -275,15 +273,16 @@ public class Shooter extends SubsystemBase {
         m_shooterState = shooterState;
     }
 
-    /** Driver aims manually. Snapshot a known table preset instead of trusting bad X/Y. */
-    public void startManualShot() {
+    /** Driver aims manually; fixed tower range and trims latch until trigger release. */
+    public void startTowerShot() {
         setState(IndexerState.ZERO, PivotState.SCORE, ShooterState.SCORE);
-        m_manualShot = ManualShotPreset.create(m_manualShotDistance.get(),
-            m_pivotOffset.get(), m_shooterRpsOffset.get());
+        m_manualShot = ManualShotPreset.tower(m_pivotOffset.get(), m_shooterRpsOffset.get());
         m_targetPivotPosition = m_manualShot.pivotRotations();
         m_targetShooterRps = m_manualShot.wheelRps();
-        SmartDashboard.putString("Shooter/ControlMode", "MANUAL PRESET - aim with right stick");
+        SmartDashboard.putString("Shooter/ControlMode", "TOWER PRESET - aim with right stick");
         SmartDashboard.putNumber("Shooter/Manual shot distance m", m_manualShot.distanceMeters());
+        SmartDashboard.putNumber("Shooter/TowerShot/TargetPivotRot", m_targetPivotPosition);
+        SmartDashboard.putNumber("Shooter/TowerShot/TargetRps", m_targetShooterRps);
     }
 
     public boolean isManualShotActive() { return m_manualShot != null; }

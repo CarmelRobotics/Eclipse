@@ -4,8 +4,12 @@ import edu.wpi.first.math.MathUtil;
 
 /** An explicitly manual, latched shot; never derives range from untrusted odometry. */
 public record ManualShotPreset(double distanceMeters, double pivotRotations, double wheelRps) {
-  public static final double DEFAULT_DISTANCE_METERS = 2.75;
-  public static final String DISTANCE_KEY = "ShotTuning/ManualShotDistanceM";
+  public static final double DEFAULT_DISTANCE_METERS = ShooterConstants.kTowerShotDistanceMeters;
+
+  /** Fixed tower range; stale dashboard range values must not select a different shot. */
+  public static ManualShotPreset tower(double pivotOffset, double rpsOffset) {
+    return create(ShooterConstants.kTowerShotDistanceMeters, pivotOffset, rpsOffset);
+  }
 
   public static ManualShotPreset create(double distance, double pivotOffset, double rpsOffset) {
     double range = Double.isFinite(distance) ? MathUtil.clamp(distance, 1.5, 5.0)

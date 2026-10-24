@@ -9,11 +9,30 @@ the Limelight API to `wpired` or reflect odometry just because the DS reports Re
 do not rotate the chassis toward a hub or pass target; yaw remains on the driver's
 right stick. Dashboard edits cannot re-enable it. Trench/tower assists remain disabled.
 
-Shooting still operates: initialized localization allows distance-based hub/pass targets
-with **MANUAL AIM / AUTO RANGE** displayed. Without initialization, right trigger retains
-the manually aimed 2.75 m preset fallback described below. The teleop heading-readiness
-check is not required for feeding when auto-alignment is disabled; mechanical readiness
-and existing bounded spin-up behavior remain.
+Right trigger now always uses **TOWER PRESET**, independent of pose, alliance, tags,
+hub-active shifts, or range. The driver must aim and choose the shooting location/time;
+right trigger no longer automatically changes to a pass. POV-up smart pass and POV-right
+manual ferry remain separate controls. Mechanical readiness, the existing 1.25-second
+spin-up timeout, feed recovery, and release cleanup remain.
+
+### Fixed tower-shot starting point
+
+The [official FIRST field drawings](https://firstfrc.blob.core.windows.net/frc2026/FieldAssets/2026-field-dimension-dwgs.pdf),
+FE-2026 sheet 3 (welded perimeter), show **115.05 in from the field-facing tower uprights
+to the near hub face**. Add half the 47 in hub depth to target its center:
+`(115.05 + 47 / 2) * 0.0254 = 3.51917 m`, rounded to **3.52 m**.
+This assumes the shooter is beside the upright line, not against the alliance wall or
+at the forward edge of the tower base. The robot's actual release point changes range.
+
+The existing shot table at 3.52 m gives **0.07614 pivot output rotations (27.4104 degrees
+from the mechanism's zero, not a measured ball launch angle)** and **46.55 RPS (2793 RPM)**.
+`ShooterConstants.kTowerShotDistanceMeters` fixes the base range in code. Old dashboard
+`ShotTuning/ManualShotDistanceM` values are ignored. Existing `ShotTuning/PivotOffset`
+and `ShotTuning/ShooterRpsOffset` trims snapshot on each trigger press; neither dashboard
+edits nor odometry/motion/tilt compensation alter the targets during that hold. Release
+and re-press to pick up new trims. `Shooter/TowerShot/TargetPivotRot` and `TargetRps`
+show the effective latched targets. This is an **unverified preset based on the existing
+table**, not a guarantee that shots from every position near the tower will score.
 
 **Autonomous path-following rotation, startup alignment, and autonomous shooting heading
 control are unchanged. This does not resolve the reported backwards autonomous launch.**
@@ -27,9 +46,8 @@ control are unchanged. This does not resolve the reported backwards autonomous l
    reversed driver-stick perspective. Never press it in an arbitrary orientation.
 3. Valid stationary camera frames establish X/Y without an auto. Verify
    `Localization/Ready to aim` is true for trusted field calculations. Teleop auto-align
-   remains disabled regardless of this value. RANGED/PRESET selection
-   latches per right-trigger press; release and press again after initialization to
-   switch out of the manual fallback.
+   remains disabled regardless of this value. Right trigger stays on the fixed tower
+   preset even after initialization; these steps do not re-enable automatic ranging.
 
 A PathPlanner full-pose reset initializes X/Y and heading automatically; do not apply
 this downfield reset during/after an auto unless physically pointing downfield.
@@ -50,19 +68,16 @@ this downfield reset during/after an auto unless physically pointing downfield.
   rather than teleporting the pose. Large corrections can be acquired while stationary
   and disabled. Normal nearby measurements still fuse; losing tags retains odometry.
 - Vision initialization changes X/Y only. It does not silently trust camera yaw.
-- Until position, heading, and alliance are initialized, automatic aiming and
-  position-dependent shooting remain blocked, including the auto spin-up timeout
-  path. **Right trigger does not become a dead button:** it selects a manually aimed
-  fixed-range hub shot, preserving manual joystick rotation. Default range is **2.75 m**
-  (existing shot table, not a new ballistic model). `ShotTuning/ManualShotDistanceM`
-  can be set from 1.5 to 5 m **before** pressing the trigger. Range and existing pivot/RPS
-  trims snapshot at the press and stay unchanged for that hold. This is not automatic
-  range estimation: the driver must aim and shoot from the selected approximate range.
-- `Shooter/ControlMode` explicitly shows MANUAL AIM / AUTO RANGE versus MANUAL PRESET; `aim/auto mode`
-  also reports MANUAL PRESET when unlocalized. A manual shot starts spinning immediately,
+- Until position, heading, and alliance are initialized, position-dependent automatic
+  shooting remains blocked, including the autonomous spin-up timeout path. **Right
+  trigger is independent of this gate:** it always selects the fixed 3.52 m tower
+  preset, preserving manual joystick rotation. The driver must aim and shoot from
+  the corresponding approximate range.
+- `Shooter/ControlMode` explicitly shows TOWER PRESET; `aim/auto mode` also reports
+  TOWER PRESET regardless of localization. A tower shot starts spinning immediately,
   then follows the existing readiness-or-1.25-second-timeout feed/recovery sequence.
   Release stops feed and clears manual targets; the normal low-speed idle pre-spin may
-  remain. Ordinary driving/intake and the separate manual ferry are unchanged.
+  remain. Ordinary driving/intake and the separate pass/ferry controls are unchanged.
 - `Sim/ApplyPose` cannot move a real robot's estimate. `active hub alliance` now displays
   Both/Neither where applicable, rather than mislabeling both-active periods as Blue.
 
@@ -79,10 +94,11 @@ alliances. Existing auto/path tests remain enabled. These are synthetic camera i
 not validation of the physical Limelight or event field.
 
 The right-trigger regression test constructs the actual RobotContainer, simulates an
-Xbox trigger in teleop with no localization, and checks the native flywheel velocity
-request, indexer feed, release cleanup, fixed-preset latching, and automatic selection
-of pose-based range on a subsequent localized press. It also verifies A, right trigger,
-and POV-up preserve joystick yaw without updating a heading-lock target. The localization
+Xbox trigger on both alliances with no localization, and checks native flywheel velocity
+and pivot position requests, indexer feed, release cleanup, fixed-preset/trim latching,
+and the same tower preset on a later localized, out-of-range press. It also verifies
+old dashboard range values are ignored, switching to autonomous cancels the teleop shot,
+and A, right trigger, and POV-up preserve joystick yaw without updating a heading-lock target. The localization
 integration test verifies autonomous heading requests still work on both alliances.
 No desktop, robot, or camera connection is started.
 

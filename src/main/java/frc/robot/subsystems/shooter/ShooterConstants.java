@@ -32,6 +32,13 @@ public final class ShooterConstants {
     public static final double kFieldLengthMeters = 16.541;
     public static final double kFieldWidthMeters = 8.069;
 
+    // Fixed teleop shot from beside the field-facing tower uprights. Official
+    // FE-2026 sheet 3: uprights to near hub face = 115.05 in; hub depth = 47 in.
+    // To hub CENTER: (115.05 + 47 / 2) * 0.0254 = 3.51917 m, rounded to 3.52 m.
+    // This assumes the shooter is near the upright line, NOT at the alliance wall.
+    // Robot/release-point offset and real ball flight still require field verification.
+    public static final double kTowerShotDistanceMeters = 3.52;
+
     // ===== Passing (ferry to the alliance zone) =====
     // Pass landing targets are the alliance-zone corners. The heavy backspin makes
     // balls check up and often bounce BACK toward the field on landing, so the aim

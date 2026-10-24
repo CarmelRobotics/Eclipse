@@ -573,17 +573,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putNumber("pass/distance", getPassDistance());
             SmartDashboard.putBoolean("our hub active", m_ourHubActive);
 
-            // What a right-trigger pull would do right now (the choice latches at the pull).
-            // Mirrors the binding's condition exactly: in range AND in the alliance zone AND
-            // our hub is active (during the opponent's shift a hub shot scores nothing, so
-            // the pull ferries instead).
+            // Right trigger is a fixed, manually aimed tower shot, not a pose-based
+            // hub/pass selector. Keep the diagnostic consistent with the actual binding.
             boolean inAllianceZone = isInAllianceZone();
             SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
-            SmartDashboard.putString("aim/auto mode",
-                !isFieldAimingReady() ? "MANUAL PRESET"
-                    : getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
-                    && inAllianceZone && m_ourHubActive
-                    ? "HUB" : "PASS");
+            SmartDashboard.putString("aim/auto mode", "TOWER PRESET");
 
             // Compute which alliance currently has active hub (Blue or Red)
             boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
