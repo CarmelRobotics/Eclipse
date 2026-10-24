@@ -15,6 +15,7 @@ import frc.robot.util.RobotLogger;
 public class Robot extends TimedRobot {
   private Command m_autonomousCommand;
   private int m_diagLoopCount = 0;  // decimates robotPeriodic dashboard writes to 10 Hz
+  private boolean m_enteredAutonomous;
 
   private final RobotContainer m_robotContainer;
 
@@ -66,6 +67,8 @@ public class Robot extends TimedRobot {
 
   @Override
   public void autonomousInit() {
+    m_enteredAutonomous = true;
+    m_robotContainer.prepareForMatch();
     m_autonomousCommand = m_robotContainer.getAutonomousCommand();
 
     if (m_autonomousCommand != null) {
@@ -81,6 +84,8 @@ public class Robot extends TimedRobot {
 
   @Override
   public void teleopInit() {
+    // Covers teleop-only practice/enables as well as a match with no selected auto.
+    if (!m_enteredAutonomous) m_robotContainer.prepareForMatch();
     if (m_autonomousCommand != null) {
       m_autonomousCommand.cancel();
     }

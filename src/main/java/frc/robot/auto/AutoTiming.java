@@ -15,6 +15,8 @@ public final class AutoTiming {
   // timeout. Includes the optimized drive cycle, 1.25 s spin-up, useful final feed
   // and scheduler margin. A slow preparation stays at the first score instead.
   public static final double SECOND_CYCLE_RESERVE_SECONDS = 9.0;
+  // New paths only: 7.446 s drive + 1.25 s readiness + .5 s feed + .25 s scheduling.
+  public static final double MAX_AGGRESSION_SECOND_CYCLE_RESERVE_SECONDS = 9.45;
   // Team-requested timed unload. This is not a hopper-empty or jam-clear indication.
   public static final double DUMP_FEED_SECONDS = 5.0;
   public static final double MIN_FINAL_FEED_SECONDS = 0.5;
@@ -25,8 +27,13 @@ public final class AutoTiming {
 
   /** Do not leave a successful first score unless there is time to get back and shoot again. */
   public static boolean canStartSecondCycle(double elapsedSeconds) {
+    return canStartSecondCycle(elapsedSeconds, SECOND_CYCLE_RESERVE_SECONDS);
+  }
+
+  public static boolean canStartSecondCycle(double elapsedSeconds, double reserveSeconds) {
     return Double.isFinite(elapsedSeconds) && elapsedSeconds >= 0
-        && elapsedSeconds <= DURATION_SECONDS - SECOND_CYCLE_RESERVE_SECONDS;
+        && Double.isFinite(reserveSeconds) && reserveSeconds > 0 && reserveSeconds < DURATION_SECONDS
+        && elapsedSeconds <= DURATION_SECONDS - reserveSeconds;
   }
 
   public static Command guard(Command selected, BooleanSupplier mayContinue,

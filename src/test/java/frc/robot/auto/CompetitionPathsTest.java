@@ -501,11 +501,11 @@ class CompetitionPathsTest {
     }
   }
 
-  private static void followWithLag(String name, PathPlannerTrajectory trajectory, double lag) throws Exception {
+  static void followWithLag(String name, PathPlannerTrajectory trajectory, double lag) throws Exception {
     followWithLag(name, trajectory, lag, .04, -.03, 2);
   }
 
-  private static void followWithLag(String name, PathPlannerTrajectory trajectory, double lag,
+  static void followWithLag(String name, PathPlannerTrajectory trajectory, double lag,
       double placementX, double placementY, double placementYaw) throws Exception {
     double pickupStart = pickupStartTime(PathPlannerPath.fromPathFile(name.replace(" Red", "")), trajectory);
     var controller = new PPHolonomicDriveController(new PIDConstants(10, 0, 0), new PIDConstants(7, 0, 0));

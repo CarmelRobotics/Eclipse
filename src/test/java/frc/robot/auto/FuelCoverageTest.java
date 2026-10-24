@@ -117,13 +117,13 @@ class FuelCoverageTest {
     assertAll(checks);
   }
 
-  private record IntakeSample(double x, double y, double cos, double sin) {}
+  record IntakeSample(double x, double y, double cos, double sin) {}
 
   private static List<IntakeSample> samples(List<PathPlannerTrajectory> trajectories) {
     return samples(trajectories, 0);
   }
 
-  private static List<IntakeSample> samples(List<PathPlannerTrajectory> trajectories, double firstPickupTime) {
+  static List<IntakeSample> samples(List<PathPlannerTrajectory> trajectories, double firstPickupTime) {
     List<IntakeSample> result = new ArrayList<>();
     for (int i = 0; i < trajectories.size(); i++) {
       var trajectory = trajectories.get(i);
@@ -140,7 +140,7 @@ class FuelCoverageTest {
     return result;
   }
 
-  private static boolean covers(List<IntakeSample> samples, Translation2d fuel) {
+  static boolean covers(List<IntakeSample> samples, Translation2d fuel) {
     for (var sample : samples) {
       double dx = fuel.getX() - sample.x();
       double dy = fuel.getY() - sample.y();

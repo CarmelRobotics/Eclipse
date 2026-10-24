@@ -35,6 +35,7 @@ import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -46,10 +47,12 @@ import frc.robot.config.FeatureFlags;
 import frc.robot.subsystems.power.DriveCurrentPolicy;
 import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
 import frc.robot.subsystems.localisation.LimelightHelpers;
+import frc.robot.subsystems.localisation.FieldLocalization;
 import frc.robot.subsystems.localisation.LimelightInfo;
 import frc.robot.subsystems.localisation.LocalisationConstants;
 import frc.robot.subsystems.shooter.ShooterConstants;
 import frc.robot.util.LoggedTunableNumber;
+import frc.robot.util.RobotLogger;
 
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
@@ -63,6 +66,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
     // Heading-locked drive request shared by faceHubCommand; PID configured in configureAutoBuilder.
     private final SwerveRequest.FieldCentricFacingAngle snapRequest = new SwerveRequest.FieldCentricFacingAngle();
+    private final SwerveRequest.FieldCentric m_unlocalizedDrive = new SwerveRequest.FieldCentric();
+    private final FieldLocalization m_localization = new FieldLocalization();
+    private Pose2d m_rawVisionPose = Pose2d.kZero;
+    private double m_rawVisionAge = -1;
     // Counts how many times vision has reset the pose. If this isn't climbing while a
     // tag is in view, vision positioning is broken -- check the Limelight name and NT.
     private int m_visionPoseResets = 0;
@@ -130,7 +137,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.kZero;
     /* Keep track if we've ever applied the operator perspective before or not */
     private boolean m_hasAppliedOperatorPerspective = false;
-    private Optional<Alliance> m_lastAlliance = Optional.empty();
 
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
@@ -301,14 +307,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 ),
                 config,
                 // Assume the path needs to be flipped for Red vs Blue, this is normally the case
-                () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
+                this::isRedAlliance,
                 this // Subsystem for requirements
             );
         } catch (Exception ex) {
             DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", ex.getStackTrace());
         }
 
-        m_lastAlliance = Optional.of(DriverStation.getAlliance().orElse(Alliance.Blue));
         updateAllianceDependentState();
         // P turns toward the hub; the small D damps the approach so it settles instead of
         // overshooting and hunting. If aim chatters at rest, lower D first, then P.
@@ -371,9 +376,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     private void updateAllianceDependentState() {
-        DriverStation.getAlliance().ifPresent(allianceColor -> {
-            m_lastAlliance = Optional.of(allianceColor);
-
+        m_localization.observeAlliance(DriverStation.getAlliance(), DriverStation.isFMSAttached(),
+            DriverStation.isDisabled(), getState().Pose);
+        m_localization.alliance().ifPresent(allianceColor -> {
             if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
                 m_operatorForwardDirection = allianceColor == Alliance.Red
                     ? kRedAlliancePerspectiveRotation
@@ -390,20 +395,45 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     /**
      * Converts an absolute blue-origin field bearing into the frame FieldCentricFacingAngle
-     * expects. The request's default ForwardPerspective (OperatorPerspective) rotates
-     * TargetDirection by the operator-forward direction -- 180 degrees when the DS alliance
-     * is Red (verified in the Phoenix 26.1.0 sources, SwerveRequest.FieldCentricFacingAngle
-     * .apply()). All of our aim targets (hub, pass corner, assist locks) are blue-origin
-     * bearings, so WITHOUT this compensation every heading-locked feature pointed 180 deg
-     * wrong on a Red DS: hub/pass aim faced away from the target, and the trench/tower
-     * assist spun continuously (its nearest-90 lock re-snaps 60 deg into any rotation, so
-     * the rotated target stayed ~180 deg ahead of the robot forever). Pre-rotating by the
-     * inverse here makes the request's own rotation land back on the true field bearing.
-     * Blue DS is a no-op; a 180 rotation is self-inverse, so the compensation cannot be
-     * applied in the "wrong direction".
+     * expects. OperatorPerspective rotates TargetDirection by our custom operator-forward
+     * direction (Blue=180, Red=0). All aim targets are absolute blue-origin
+     * bearings. Pre-rotating by the inverse makes the request's own rotation land
+     * back on the true field bearing instead of applying an extra perspective rotation.
+     * Keep this separate from seeding the robot's actual field heading.
      */
     public Rotation2d fieldToOperatorBearing(Rotation2d fieldBearing) {
         return fieldBearing.rotateBy(m_operatorForwardDirection.unaryMinus());
+    }
+
+    public boolean isRedAlliance() {
+        updateAllianceDependentState();
+        return m_localization.isRed();
+    }
+
+    public boolean hasAlliance() { return m_localization.alliance().isPresent(); }
+    public boolean isFieldAimingReady() { return m_localization.readyToAim(); }
+
+    public void prepareForMatch() {
+        updateAllianceDependentState();
+        m_localization.prepareForMatch(getState().Pose, DriverStation.isFMSAttached());
+    }
+
+    @Override
+    public void resetPose(Pose2d pose) {
+        super.resetPose(pose);
+        // Native superclass construction must not depend on subclass initialization.
+        if (m_localization != null) m_localization.seedPose(pose);
+    }
+
+    /** Robot +X/front must face away from our alliance wall, NOT the rear intake. */
+    public void seedDownfieldHeading() {
+        updateAllianceDependentState();
+        m_localization.alliance().ifPresent(alliance -> {
+            // seedFieldCentric() uses our intentionally reversed DRIVER perspective;
+            // it is not the robot's absolute blue-origin field heading.
+            super.resetRotation(FieldLocalization.downfieldHeading(alliance));
+            m_localization.seedHeading();
+        });
     }
 
     @Override
@@ -425,33 +455,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
          */
         updateAllianceDependentState();
 
-        // === Vision localization: snap when lost, fuse when tracking ===
-        // Two regimes, split by how far the vision estimate is from the current pose:
-        //
-        //   FAR OFF (> kMaxVisionCorrectionMeters): the pose is simply wrong (startup,
-        //   robot carried, odometry ran blind too long). Snap: resetPose to vision XY +
-        //   gyro heading. Fusing here would take seconds to converge; snapping is right.
-        //
-        //   CLOSE (<= threshold): normal tracking. Feed the estimate into the built-in
-        //   Kalman filter (addVisionMeasurement) instead of hard-resetting. The filter
-        //   blends vision with wheel odometry, which does two important things:
-        //     1. Smooths single-tag botpose jitter so the aim target doesn't vibrate.
-        //     2. Absorbs the garbage frames the camera produces right as a tag leaves
-        //        the FOV (edge distortion + motion blur while rotating). A hard reset on
-        //        one of those stranded the pose wrong just as vision went blind -- which
-        //        is exactly when odometry needs a good starting point to carry the aim.
-        //
-        //   NO TAGS: odometry carries the pose from the last good fusion, so aiming
-        //   keeps working when the tag leaves view (it drifts slowly, ~cm/s, vs. being
-        //   frozen or wrong).
-        //
-        // Always read the BLUE-origin botpose regardless of alliance -- everything else
-        // here (Field2d, hub positions, trench bounds, PathPlanner) is blue-origin.
-        //
-        // NOTE: pose changes go through resetPose()/addVisionMeasurement() imperatively.
-        // Do NOT route them through a Command-returning helper -- an unscheduled Command
-        // silently does nothing (that bug shipped twice: lintake stow, vision seeding).
+        // One BLUE-origin frame for vision, odometry, aiming, PathPlanner, and Elastic.
+        // Validate freshness/quality before fusion. Position acquisition requires
+        // consistent stationary frames; a trusted enabled pose can NEVER be teleported
+        // across the field by one distant/mirrored vision measurement.
         boolean hubVisible = false;
+        double visionNow = Timer.getFPGATimestamp();
         for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
             // Give the camera our heading + yaw rate (needed if we ever switch to MegaTag2;
             // harmless for the MegaTag1 botpose read below).
@@ -467,26 +476,22 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             final LimelightHelpers.PoseEstimate estimate =
                 LimelightHelpers.getBotPoseEstimate_wpiBlue(limelight.name());
 
-            if (estimate == null || estimate.tagCount == 0) {
-                continue;  // No tags in view; odometry carries the pose
-            }
-            hubVisible = true;
+            hubVisible |= FieldLocalization.fresh(estimate, visionNow)
+                && estimate != null && estimate.tagCount > 0;
+            m_rawVisionAge = estimate == null ? -1 : visionNow - estimate.timestampSeconds;
+            if (estimate != null && estimate.tagCount > 0) m_rawVisionPose = estimate.pose;
 
-            double visionDelta = estimate.pose.getTranslation()
-                .getDistance(getState().Pose.getTranslation());
-
-            // FeatureFlags.VisionFusion off -> read + publish diagnostics but never touch the
-            // pose (pure wheel odometry). The field escape hatch if the camera goes bad.
             if (FeatureFlags.VISION_FUSION.getAsBoolean()) {
-                if (visionDelta > ShooterConstants.kMaxVisionCorrectionMeters) {
-                    // Grossly off: snap to vision XY, keep the gyro's heading (vision heading
-                    // jitters a few degrees; the Pigeon owns rotation).
-                    resetPose(new Pose2d(
+                var update = m_localization.evaluate(estimate, visionNow, getState().Pose,
+                    getState().Speeds, DriverStation.isDisabled());
+                if (update == FieldLocalization.Update.SEED_TRANSLATION) {
+                    // This is XY-only: do not mark an unknown gyro heading initialized.
+                    super.resetPose(new Pose2d(
                         estimate.pose.getTranslation(),
                         getState().Pose.getRotation()
                     ));
                     m_visionPoseResets++;
-                } else {
+                } else if (update == FieldLocalization.Update.FUSE) {
                     // Tracking: fuse translation only (infinite heading sigma -- Pigeon owns
                     // rotation). sigma = 0.05 + 0.02*d^2 (0.07 m at 1 m, 0.37 m at 4 m).
                     double xyStdDev = 0.05 + 0.02 * estimate.avgTagDist * estimate.avgTagDist;
@@ -500,14 +505,16 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
             // Raw vision diagnostics -- compare these against where the robot actually is.
             if (diagLoop) {
-                SmartDashboard.putNumber("vision/pose x", estimate.pose.getX());
-                SmartDashboard.putNumber("vision/pose y", estimate.pose.getY());
-                SmartDashboard.putNumber("vision/tag count", estimate.tagCount);
-                SmartDashboard.putNumber("vision/avg tag dist", estimate.avgTagDist);
+                SmartDashboard.putNumber("vision/pose x", m_rawVisionPose.getX());
+                SmartDashboard.putNumber("vision/pose y", m_rawVisionPose.getY());
+                SmartDashboard.putNumber("vision/tag count",
+                    estimate != null && FieldLocalization.fresh(estimate, visionNow) ? estimate.tagCount : 0);
+                SmartDashboard.putNumber("vision/avg tag dist", estimate == null ? -1 : estimate.avgTagDist);
+                SmartDashboard.putNumber("vision/frame age seconds", m_rawVisionAge);
                 // Camera-yaw diagnostic: with the gyro seeded correctly, this vision heading
                 // should MATCH "pose heading". If it's ~180 deg off, the Limelight mounting yaw
                 // is wrong -- that mismatch is what reverses controls when the heading seed is on.
-                SmartDashboard.putNumber("vision/pose heading deg", estimate.pose.getRotation().getDegrees());
+                SmartDashboard.putNumber("vision/pose heading deg", m_rawVisionPose.getRotation().getDegrees());
                 SmartDashboard.putNumber("pose heading deg", getState().Pose.getRotation().getDegrees());
             }
         }
@@ -535,6 +542,15 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // === Dashboard diagnostics (decimated to 10 Hz) ===
         if (diagLoop) {
             m_field.setRobotPose(getState().Pose);
+            SmartDashboard.putString("Localization/Alliance",
+                m_localization.alliance().map(Enum::name).orElse("Unknown"));
+            SmartDashboard.putBoolean("Localization/FMS attached", DriverStation.isFMSAttached());
+            SmartDashboard.putBoolean("Localization/Position initialized", m_localization.positionKnown());
+            SmartDashboard.putBoolean("Localization/Heading initialized", m_localization.headingKnown());
+            SmartDashboard.putBoolean("Localization/Ready to aim", isFieldAimingReady());
+            SmartDashboard.putString("Localization/Vision status", m_localization.status());
+            SmartDashboard.putString("Localization/Aim status", isFieldAimingReady()
+                ? "Ready" : "BLOCKED: initialize alliance, field position, and heading");
             SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
             SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
             SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
@@ -564,8 +580,22 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
             // Compute which alliance currently has active hub (Blue or Red)
             boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
-            String activeAlliance = blueHubActive ? "Blue" : "Red";
+            boolean redHubActive = computeHubActiveForAlliance(Alliance.Red, matchTime, gameData);
+            String activeAlliance = blueHubActive ? (redHubActive ? "Both" : "Blue")
+                : (redHubActive ? "Red" : "Neither");
             SmartDashboard.putString("active hub alliance", activeAlliance);
+        }
+        if (RobotLogger.shouldLogPeriodic()) {
+            RobotLogger.log("Localization/X", getState().Pose.getX());
+            RobotLogger.log("Localization/Y", getState().Pose.getY());
+            RobotLogger.log("Localization/HeadingDeg", getState().Pose.getRotation().getDegrees());
+            RobotLogger.log("Localization/RawVisionX", m_rawVisionPose.getX());
+            RobotLogger.log("Localization/RawVisionY", m_rawVisionPose.getY());
+            RobotLogger.log("Localization/VisionAgeSeconds", m_rawVisionAge);
+            RobotLogger.log("Localization/Alliance", m_localization.alliance().map(Enum::name).orElse("Unknown"));
+            RobotLogger.log("Localization/FMSAttached", DriverStation.isFMSAttached());
+            RobotLogger.log("Localization/ReadyToAim", isFieldAimingReady());
+            RobotLogger.log("Localization/VisionStatus", m_localization.status());
         }
     }
 
@@ -601,7 +631,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     private boolean computeOurHubActive(double matchTime, String gameData) {
-        return DriverStation.getAlliance()
+        return m_localization.alliance()
             .map(alliance -> computeHubActiveForAlliance(alliance, matchTime, gameData))
             .orElse(false);
     }
@@ -682,21 +712,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         return getState().Pose.getTranslation().getDistance(getHubPosition());
     }
 
-    // Which hub to aim at. In a real match (FMS attached) it's the alliance hub. In the
-    // shop it's whichever hub is CLOSER -- practice DSes routinely sit on the wrong
-    // alliance, and aiming at the far hub (~9 m away) made the robot "aim forward" from
-    // everywhere and clamped the shot tables at max range (max hood angle, max RPS).
+    // Always use the known DS alliance, including outside FMS. A bad pose or a
+    // transient FMS disconnect must never switch our target to the other hub.
+    // Unknown returns a numeric diagnostic target only; readyToAim() stays false.
     public Translation2d getHubPosition() {
-        if (DriverStation.isFMSAttached()) {
-            return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
-                ? ShooterConstants.kRedHubPosition
-                : ShooterConstants.kBlueHubPosition;
-        }
-        Translation2d robot = getState().Pose.getTranslation();
-        return robot.getDistance(ShooterConstants.kBlueHubPosition)
-                <= robot.getDistance(ShooterConstants.kRedHubPosition)
-            ? ShooterConstants.kBlueHubPosition
-            : ShooterConstants.kRedHubPosition;
+        return m_localization.isRed() ? ShooterConstants.kRedHubPosition : ShooterConstants.kBlueHubPosition;
     }
 
     // True when the robot is legally inside its own alliance zone; gates hub shots on
@@ -706,7 +726,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // zone is everything between your wall and your hub's X. The pose is absolute
     // blue-origin and does NOT flip by alliance, hence the explicit per-alliance hub X.
     public boolean isInAllianceZone() {
-        boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        if (m_localization.alliance().isEmpty()) return false;
+        boolean red = m_localization.isRed();
         double robotX = getState().Pose.getX();
         double hubX = (red ? ShooterConstants.kRedHubPosition
                            : ShooterConstants.kBlueHubPosition).getX();
@@ -968,12 +989,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // Heading-locked drive: the heading snaps to the computed hub heading (with PID stiffness),
     // while the driver retains full translation control. Used during aiming and charging shots.
     public Command faceHubCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity) {
-        return applyRequest(() -> snapRequest
+        return faceHubCommand(xVelocity, yVelocity, () -> 0.0);
+    }
+
+    public Command faceHubCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity,
+            Supplier<Double> manualRotation) {
+        return applyRequest(() -> isFieldAimingReady() ? snapRequest
             .withVelocityX(xVelocity.get())
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
             .withTargetDirection(fieldToOperatorBearing(getHubHeading()))
+            : m_unlocalizedDrive.withVelocityX(xVelocity.get()).withVelocityY(yVelocity.get())
+                .withRotationalRate(manualRotation.get()).withDeadband(Constants.kMaxSpeed * 0.1)
+                .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
         );
     }
 
@@ -983,7 +1012,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // hysteresis at the centerline), inset from the walls so balls land in the zone
     // instead of ricocheting off the corner. Own alliance end comes from the DS setting.
     public Translation2d getPassTarget() {
-        boolean red = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        boolean red = m_localization.isRed();
         double inset = m_passCornerInset.get();
         double x = red
             ? ShooterConstants.kFieldLengthMeters - inset
@@ -1013,12 +1042,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     // Heading-locked drive toward the pass corner; driver keeps translation control.
     public Command facePassTargetCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity) {
-        return applyRequest(() -> snapRequest
+        return facePassTargetCommand(xVelocity, yVelocity, () -> 0.0);
+    }
+
+    public Command facePassTargetCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity,
+            Supplier<Double> manualRotation) {
+        return applyRequest(() -> isFieldAimingReady() ? snapRequest
             .withVelocityX(xVelocity.get())
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
             .withTargetDirection(fieldToOperatorBearing(getPassHeading()))
+            : m_unlocalizedDrive.withVelocityX(xVelocity.get()).withVelocityY(yVelocity.get())
+                .withRotationalRate(manualRotation.get()).withDeadband(Constants.kMaxSpeed * 0.1)
+                .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
         );
     }
 

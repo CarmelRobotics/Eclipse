@@ -174,6 +174,12 @@ public class RobotContainer {
         autoTravelCommand(AutoTiming.TRAVEL_TIMEOUT_SECONDS));
     NamedCommands.registerCommand("auto cycle 2 left", secondCycleCommand(Rotation2d.fromDegrees(-90)));
     NamedCommands.registerCommand("auto cycle 2 right", secondCycleCommand(Rotation2d.fromDegrees(90)));
+    // Begin near the scoring bearing, then align to 180 within the clear alliance-side
+    // corner. The new path still locks its heading before any trench overlap.
+    NamedCommands.registerCommand("max cycle 2 left", secondCycleCommand(Rotation2d.fromDegrees(-45),
+        AutoTiming.MAX_AGGRESSION_SECOND_CYCLE_RESERVE_SECONDS));
+    NamedCommands.registerCommand("max cycle 2 right", secondCycleCommand(Rotation2d.fromDegrees(45),
+        AutoTiming.MAX_AGGRESSION_SECOND_CYCLE_RESERVE_SECONDS));
     NamedCommands.registerCommand("intake deploy", m_lintake.setState(PinionState.GROUND));
     var collectBrake = new SwerveRequest.SwerveDriveBrake();
     NamedCommands.registerCommand("auto collect settle", Commands.deadline(
@@ -198,6 +204,10 @@ public class RobotContainer {
   }
 
   private Command secondCycleCommand(Rotation2d blueHeading) {
+    return secondCycleCommand(blueHeading, AutoTiming.SECOND_CYCLE_RESERVE_SECONDS);
+  }
+
+  private Command secondCycleCommand(Rotation2d blueHeading, double reserveSeconds) {
     Command finishHere = timedShotCommand(PivotState.SCORE, ShooterState.SCORE,
         AutoTiming.DURATION_SECONDS).beforeStarting(() -> SmartDashboard.putString("Auto/Status",
             "Cycle 2 skipped; finish unloading at first score"));
@@ -205,13 +215,13 @@ public class RobotContainer {
         Commands.sequence(
             autoTravelCommand(AutoTiming.TRAVEL_TIMEOUT_SECONDS, blueHeading),
             Commands.either(Commands.none(), finishHere,
-                () -> AutoTiming.canStartSecondCycle(m_autoTimer.get()))
+                () -> AutoTiming.canStartSecondCycle(m_autoTimer.get(), reserveSeconds))
                 .onlyIf(() -> m_autoTravelReady)),
         // If the trench detour and a useful final shot cannot fit, keep unloading.
         // The outer guard stops this branch without starting the following path.
         timedShotCommand(PivotState.SCORE, ShooterState.SCORE, AutoTiming.DURATION_SECONDS)
             .beforeStarting(() -> SmartDashboard.putString("Auto/Status", "Cycle 2 skipped before preparation")),
-        () -> AutoTiming.canStartSecondCycle(m_autoTimer.get()));
+        () -> AutoTiming.canStartSecondCycle(m_autoTimer.get(), reserveSeconds));
   }
 
   private void configureBindings() {
@@ -273,7 +283,10 @@ public class RobotContainer {
     //insideStructure.onFalse(Commands.runOnce(() -> m_lintake.setPinionState(PinionState.STOW)));
 
     // Driver buttons must not interrupt the autonomous command or reset its heading.
-    m_controller.povDown().and(teleop).onTrue(m_drivetrain.runOnce(m_drivetrain::seedFieldCentric));
+    // Explicit absolute heading, independent of our reversed driver-stick perspective.
+    // Point robot +X/front AWAY from our alliance wall; can also seed while disabled.
+    m_controller.povDown().and(new Trigger(DriverStation::isDisabled).or(teleop))
+        .onTrue(m_drivetrain.runOnce(m_drivetrain::seedDownfieldHeading).ignoringDisable(true));
     m_controller.leftBumper().and(teleop).onTrue(m_lintake.setState(PinionState.GROUND));
     m_controller.rightBumper().and(teleop).onTrue(m_lintake.setState(PinionState.STOW));
     m_controller.button(8).and(teleop).onTrue(m_lintake.zero());
@@ -287,7 +300,7 @@ public class RobotContainer {
 
     m_controller.a().and(teleop).whileTrue(
         Commands.parallel(
-            m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
+            m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
             rumbleWhenReady(m_shooter::readyToShoot)
         )
     );
@@ -299,12 +312,12 @@ public class RobotContainer {
     m_controller.rightTrigger().and(teleop).whileTrue(
         Commands.either(
             Commands.parallel(
-                m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity),
+                m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
                 heldShotCommand(PivotState.SCORE, ShooterState.SCORE),
                 rumbleWhenReady(m_shooter::readyToShoot)
             ),
             Commands.parallel(
-                m_drivetrain.facePassTargetCommand(this::shootingXVelocity, this::shootingYVelocity),
+                m_drivetrain.facePassTargetCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
                 heldPassCommand(),
                 rumbleWhenReady(m_shooter::readyToPass)
             ),
@@ -338,7 +351,7 @@ public class RobotContainer {
     // actually spun up + aimed (2 s force-feed backstop).
     m_controller.povUp().and(teleop).whileTrue(
         Commands.parallel(
-            m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity),
+            m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity, this::driverRotationalRate),
             heldPassCommand()
         )
     );
@@ -360,6 +373,7 @@ public class RobotContainer {
     // Edit Sim/PoseX, Sim/PoseY, Sim/PoseHeadingDeg on the dashboard, then click
     // Sim/ApplyPose to teleport the robot there. All dashboard-driven, no controller.
     SmartDashboard.putData("Sim/ApplyPose", Commands.runOnce(() -> {
+      if (!edu.wpi.first.wpilibj.RobotBase.isSimulation()) return;
       m_drivetrain.resetPose(new edu.wpi.first.math.geometry.Pose2d(
         m_simPoseX.get(),
         m_simPoseY.get(),
@@ -509,7 +523,8 @@ public class RobotContainer {
   // === Timed shot (autonomous) ===
   // Shot sequence: prepare (set pivot + spin up) → wait until readyToShoot() OR 1.25 s
   // timeout expires (whichever first) → feed for feedSeconds. The timeout ensures shots
-  // never hang with the flywheel running forever; after the timeout, feed unconditionally.
+  // never hang with the flywheel running forever. The timeout cannot bypass the outer
+  // field-localization guard; missing position/heading aborts instead of feeding blind.
   // The lintake pump runs alongside the whole sequence and dies with it (deadline).
   // finallyDo() guarantees motors stop even if the command is interrupted mid-sequence.
   private Command timedShotCommand(PivotState pivotState, ShooterState shooterState, double feedSeconds) {
@@ -521,17 +536,21 @@ public class RobotContainer {
         ),
         lintakePumpCommand(),
         m_drivetrain.faceHubCommand(() -> 0.0, () -> 0.0)
-    ).finallyDo(interrupted -> stopShooter());
+    ).onlyWhile(m_drivetrain::isFieldAimingReady)
+        .finallyDo(interrupted -> stopShooter())
+        .onlyIf(m_drivetrain::isFieldAimingReady)
+        .beforeStarting(() -> {
+          if (!m_drivetrain.isFieldAimingReady()) m_autoTravelReady = false;
+        });
   }
 
   private Rotation2d autoTravelHeading(Rotation2d blueHeading) {
-    return DriverStation.getAlliance().orElse(DriverStation.Alliance.Blue)
-        == DriverStation.Alliance.Red
+    return m_drivetrain.isRedAlliance()
         ? FlippingUtil.flipFieldRotation(blueHeading) : blueHeading;
   }
 
   private boolean readyForAutoTravel(Rotation2d heading) {
-    return m_shooter.isStowedForTravel()
+    return m_drivetrain.hasAlliance() && m_shooter.isStowedForTravel()
         && Math.abs(m_drivetrain.getState().Pose.getRotation()
             .minus(heading).getDegrees()) <= 4.0
         && Math.abs(m_drivetrain.getState().Speeds.omegaRadiansPerSecond)
@@ -545,7 +564,8 @@ public class RobotContainer {
 
   private Command autoTravelCommand(double timeoutSeconds, Rotation2d blueHeading) {
     // Hold the selected start heading (+90 left / -90 right for Eclipse), or the
-    // cycle-two wall-side reposition heading (-90 left / +90 right). Alliance
+    // cycle-two wall-side reposition heading (-90 left / +90 right), or the new
+    // maximum profile's near-shot heading (-45 left / +45 right). Alliance
     // flipping and operator-perspective conversion happen exactly once below.
     return Commands.sequence(
         Commands.runOnce(() -> {
@@ -580,11 +600,11 @@ public class RobotContainer {
             m_shooter.feedWithRecoveryCommand()
         ),
         lintakePumpCommand()
-    )).finallyDo(interrupted -> {
+    )).onlyWhile(m_drivetrain::isFieldAimingReady).finallyDo(interrupted -> {
       stopShooter();
       m_lintake.setPinionState(PinionState.GROUND);
       m_lintake.setState(RollerState.ZERO);
-    });
+    }).onlyIf(m_drivetrain::isFieldAimingReady);
   }
 
   // Manual flat-out ferry. This has its own readiness gate because readyToShoot() checks the
@@ -619,7 +639,8 @@ public class RobotContainer {
             m_shooter.feedWithRecoveryCommand()
         ),
         lintakePumpCommand()
-    ).finallyDo(interrupted -> stopShooter());
+    ).onlyWhile(m_drivetrain::isFieldAimingReady)
+        .finallyDo(interrupted -> stopShooter()).onlyIf(m_drivetrain::isFieldAimingReady);
   }
 
   // === Shot prep ===
@@ -697,6 +718,8 @@ public class RobotContainer {
     // enables of the same chooser option do not throw an "already composed" exception.
     return m_guardedAutos.computeIfAbsent(selected, this::guardAutonomousCommand);
   }
+
+  public void prepareForMatch() { m_drivetrain.prepareForMatch(); }
 
   private Command guardAutonomousCommand(Command selected) {
     return AutoTiming.guard(selected, () -> m_autoTravelReady, () -> {

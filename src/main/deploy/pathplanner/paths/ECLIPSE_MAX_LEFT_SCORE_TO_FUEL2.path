@@ -1,0 +1,175 @@
+{
+  "version": "2025.0",
+  "waypoints": [
+    {
+      "anchor": {
+        "x": 3,
+        "y": 5.550000000000001
+      },
+      "prevControl": null,
+      "nextControl": {
+        "x": 3,
+        "y": 6
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 2.7,
+        "y": 6.79
+      },
+      "prevControl": {
+        "x": 2.7,
+        "y": 6.3500000000000005
+      },
+      "nextControl": {
+        "x": 2.7,
+        "y": 7.121370849898001
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 3.3,
+        "y": 7.390000000000001
+      },
+      "prevControl": {
+        "x": 2.9686291501015236,
+        "y": 7.390000000000001
+      },
+      "nextControl": {
+        "x": 4.4,
+        "y": 7.390000000000001
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 6.182716488730724,
+        "y": 7.390000000000001
+      },
+      "prevControl": {
+        "x": 5.830765517222016,
+        "y": 7.44920677339
+      },
+      "nextControl": {
+        "x": 6.6,
+        "y": 7.25
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 5.9,
+        "y": 5.95
+      },
+      "prevControl": {
+        "x": 5.9,
+        "y": 6.5
+      },
+      "nextControl": null,
+      "isLocked": false,
+      "linkedName": null
+    }
+  ],
+  "rotationTargets": [
+    {
+      "waypointRelativePos": 1,
+      "rotationDegrees": 180
+    },
+    {
+      "waypointRelativePos": 2,
+      "rotationDegrees": 180
+    },
+    {
+      "waypointRelativePos": 3,
+      "rotationDegrees": 180
+    },
+    {
+      "waypointRelativePos": 3.25,
+      "rotationDegrees": 180
+    },
+    {
+      "waypointRelativePos": 3.6,
+      "rotationDegrees": 110
+    }
+  ],
+  "constraintZones": [
+    {
+      "name": "Compact roller-off corner",
+      "minWaypointRelativePos": 0,
+      "maxWaypointRelativePos": 2,
+      "constraints": {
+        "maxVelocity": 2.8,
+        "maxAcceleration": 6,
+        "maxAngularVelocity": 540,
+        "maxAngularAcceleration": 720,
+        "nominalVoltage": 12,
+        "unlimited": false
+      }
+    },
+    {
+      "name": "Trench sprint",
+      "minWaypointRelativePos": 2,
+      "maxWaypointRelativePos": 3,
+      "constraints": {
+        "maxVelocity": 4.6,
+        "maxAcceleration": 9.6,
+        "maxAngularVelocity": 540,
+        "maxAngularAcceleration": 720,
+        "nominalVoltage": 12,
+        "unlimited": false
+      }
+    },
+    {
+      "name": "Roller-off neutral entry",
+      "minWaypointRelativePos": 3,
+      "maxWaypointRelativePos": 4,
+      "constraints": {
+        "maxVelocity": 3.6,
+        "maxAcceleration": 6,
+        "maxAngularVelocity": 540,
+        "maxAngularAcceleration": 720,
+        "nominalVoltage": 12,
+        "unlimited": false
+      }
+    }
+  ],
+  "pointTowardsZones": [],
+  "eventMarkers": [
+    {
+      "name": "intake run after trench",
+      "waypointRelativePos": 3.95,
+      "endWaypointRelativePos": null,
+      "command": {
+        "type": "named",
+        "data": {
+          "name": "intake run"
+        }
+      }
+    }
+  ],
+  "globalConstraints": {
+    "maxVelocity": 4.6,
+    "maxAcceleration": 10.2,
+    "maxAngularVelocity": 540,
+    "maxAngularAcceleration": 720,
+    "nominalVoltage": 12,
+    "unlimited": false
+  },
+  "goalEndState": {
+    "velocity": 2.8,
+    "rotation": 90
+  },
+  "reversed": false,
+  "folder": "Eclipse",
+  "idealStartingState": {
+    "velocity": 0,
+    "rotation": -45
+  },
+  "useDefaultConstraints": false
+}

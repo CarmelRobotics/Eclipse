@@ -1,0 +1,79 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "named",
+          "data": {
+            "name": "auto start right"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_MAX_RIGHT_START_TO_FUEL"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_MAX_RIGHT_COLLECT1_TO_SCORE"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "shoot"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "max cycle 2 right"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_MAX_RIGHT_SCORE_TO_FUEL2"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "ECLIPSE_MAX_RIGHT_COLLECT2_TO_SCORE"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "auto finish shoot"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "intake stop"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "stopshoot"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}

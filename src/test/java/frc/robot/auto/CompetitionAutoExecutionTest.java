@@ -62,7 +62,7 @@ class CompetitionAutoExecutionTest {
     execute(name, red, firstSpinup, secondSpinup, pivotStow, 0.35);
   }
 
-  private static void execute(String name, boolean red, double firstSpinup,
+  static void execute(String name, boolean red, double firstSpinup,
       double secondSpinup, double pivotStow, double initialStow) throws Exception {
     execute(name, red, firstSpinup, secondSpinup, pivotStow, initialStow, false);
   }
@@ -89,13 +89,16 @@ class CompetitionAutoExecutionTest {
 
   private static void execute(String name, boolean red, double firstSpinup,
       double secondSpinup, double pivotStow, double initialStow, boolean secondOnly) throws Exception {
+    boolean maximum = name.startsWith("eclipse_max_");
+    double reserve = maximum ? AutoTiming.MAX_AGGRESSION_SECOND_CYCLE_RESERVE_SECONDS
+        : AutoTiming.SECOND_CYCLE_RESERVE_SECONDS;
     AutoBuilder.resetForTesting();
     // Event markers capture NamedCommands. Never reuse one case's roller/plant
     // closures in another case via PathPlanner's global path cache.
     PathPlannerPath.clearCache();
     var plant = new Plant(RobotConfig.fromGUISettings());
     // Export one prompt-readiness case for route animation; no robot-code changes.
-    boolean exportTrace = name.equals("2910_trench_left_double") && !red && !secondOnly
+    boolean exportTrace = (name.equals("2910_trench_left_double") || name.equals("eclipse_max_left_double")) && !red && !secondOnly
         && firstSpinup == .55 && secondSpinup == .55 && pivotStow == .35 && initialStow == .35;
     List<String> trace = new ArrayList<>();
     if (exportTrace) trace.add("timeSeconds,x,y,headingDeg,speedMps,roller,intakeStarts,shots,"
@@ -110,7 +113,7 @@ class CompetitionAutoExecutionTest {
     final boolean[] admitted = {false};
     final boolean[] preparationStarted = {false};
     final int[] intakeStarts = {0};
-    var blueTravelHeading = Rotation2d.fromDegrees(name.contains("left") ? -90 : 90);
+    var blueTravelHeading = Rotation2d.fromDegrees((name.contains("left") ? -1 : 1) * (maximum ? 45 : 90));
     var travelHeading = red ? FlippingUtil.flipFieldRotation(blueTravelHeading) : blueTravelHeading;
     Timer travelClock = new Timer();
     Command travel = Commands.sequence(
@@ -185,15 +188,16 @@ class CompetitionAutoExecutionTest {
               Commands.run(() -> plant.holdHeading(plant.hubHeading(red))))
               .beforeStarting(() -> { prepareClock.restart(); roller[0] = false; })));
     }
-    NamedCommands.registerCommand(name.contains("left") ? "auto cycle 2 left" : "auto cycle 2 right", Commands.either(
+    String cycleName = (maximum ? "max cycle 2 " : "auto cycle 2 ") + (name.contains("left") ? "left" : "right");
+    NamedCommands.registerCommand(cycleName, Commands.either(
         Commands.sequence(travel, Commands.either(Commands.none(),
             NamedCommands.getCommand("auto finish shoot"), () -> {
-              admitted[0] = safe[0] && AutoTiming.canStartSecondCycle(clock.get());
+              admitted[0] = safe[0] && AutoTiming.canStartSecondCycle(clock.get(), reserve);
               return admitted[0];
             }).onlyIf(() -> safe[0])),
         NamedCommands.getCommand("auto finish shoot"),
         () -> {
-          preparationStarted[0] = AutoTiming.canStartSecondCycle(clock.get());
+          preparationStarted[0] = AutoTiming.canStartSecondCycle(clock.get(), reserve);
           return preparationStarted[0];
         }));
     Command auto;
@@ -232,7 +236,7 @@ class CompetitionAutoExecutionTest {
           feedSeconds, preparationStarted[0], admitted[0], false));
       CompetitionPathsTest.checkClearance(plant.pose, name + " full auto t=" + clock.get());
       CompetitionPathsTest.checkCrossingHeading(red ? FlippingUtil.flipFieldPose(plant.pose) : plant.pose,
-          name + " full auto t=" + clock.get());
+          name + " full auto t=" + clock.get() + " pose=" + plant.pose);
       var blue = red ? FlippingUtil.flipFieldPose(plant.pose) : plant.pose;
       if (CompetitionPathsTest.touchesBarrier(blue)
           && (red ? -plant.fieldSpeed.vxMetersPerSecond : plant.fieldSpeed.vxMetersPerSecond) < -.2) {
@@ -271,7 +275,7 @@ class CompetitionAutoExecutionTest {
           feedSeconds, preparationStarted[0], admitted[0], stopped[0]));
       var reports = Path.of("build", "reports", "auto-paths");
       Files.createDirectories(reports);
-      Files.write(reports.resolve("left-double-command-trace.csv"), trace);
+      Files.write(reports.resolve(maximum ? "max-left-double-command-trace.csv" : "left-double-command-trace.csv"), trace);
     }
     assertTrue(stopped[0], name + " skipped cleanup");
     assertFalse(roller[0], name + " left roller on");
@@ -336,14 +340,19 @@ class CompetitionAutoExecutionTest {
         assertTrue(admitted[0], name + " must run two actual collection cycles with prompt readiness");
         assertEquals(2, intakeStarts[0], name + " must restart intake after trench exit on cycle two");
       }
-      if (pivotStow == 1.35) {
+      if (!maximum && pivotStow == 1.35) {
         assertTrue(safe[0]);
         assertTrue(admitted[0], "Faster return now leaves time for a 1.35-second preparation");
       }
-      if (pivotStow == 1.55) {
+      if (!maximum && pivotStow == 1.55) {
         assertTrue(preparationStarted[0], "Late-preparation case must reach the second time check");
         assertTrue(safe[0], "This case is late, not a stow fault");
         assertFalse(admitted[0], "Time must be rechecked after successful but slow preparation");
+      }
+      if (maximum && pivotStow == 1.05) {
+        assertTrue(preparationStarted[0], "Maximum auto must evaluate late admission after preparation");
+        assertTrue(safe[0], "Successful slow stow is not a mechanical-clearance fault");
+        assertFalse(admitted[0], "Maximum auto must stay scoring if preparation consumes the departure reserve");
       }
     }
   }

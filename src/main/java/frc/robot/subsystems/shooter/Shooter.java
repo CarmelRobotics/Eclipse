@@ -503,7 +503,7 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
         }
 
-        return shotInRange && aimed && shooterReady && pivotReady;
+        return m_drive.isFieldAimingReady() && shotInRange && aimed && shooterReady && pivotReady;
     }
 
     // Pass readiness: unlike readyToShoot(), this gates on the PASS targets -- flywheel
@@ -525,7 +525,7 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putBoolean("ready/pass pivot", pivotReady);
         }
 
-        return spunUp && pivotReady && aimed;
+        return m_drive.isFieldAimingReady() && spunUp && pivotReady && aimed;
     }
 
     // SEND is a fixed-speed manual ferry, not the distance-interpolated SCORE solution.
