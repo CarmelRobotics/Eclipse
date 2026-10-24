@@ -40,6 +40,7 @@ import frc.robot.subsystems.lintake.LintakeConstants.PinionState;
 import frc.robot.subsystems.lintake.LintakeConstants.RollerState;
 import frc.robot.subsystems.shooter.Shooter;
 import frc.robot.subsystems.shooter.ShooterConstants;
+import frc.robot.subsystems.shooter.TeleopShotCommand;
 import frc.robot.util.LoggedTunableNumber;
 import frc.robot.subsystems.shooter.ShooterConstants.IndexerState;
 import frc.robot.subsystems.shooter.ShooterConstants.PivotState;
@@ -304,12 +305,14 @@ public class RobotContainer {
             rumbleWhenReady(m_shooter::readyToShoot)
         )
     );
-    // Right trigger: context-aware score. Inside hub range (5 m) -> full hub shot;
+    // Right trigger: without trusted localization -> fixed-range MANUAL shot; otherwise
+    // context-aware score. Inside hub range (5 m) -> full hub shot;
     // beyond it -> smart pass to the alliance-zone corner. The choice LATCHES at the
     // moment the trigger is pulled so the mode can't flip mid-hold at the range
     // boundary; release and re-pull to re-decide. "aim/auto mode" on the dashboard
-    // shows live which mode a pull would pick.
+    // shows live which mode a pull would pick. AUTO/MANUAL also latches until release.
     m_controller.rightTrigger().and(teleop).whileTrue(
+        TeleopShotCommand.select(m_drivetrain::isFieldAimingReady,
         Commands.either(
             Commands.parallel(
                 m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
@@ -330,7 +333,9 @@ public class RobotContainer {
                 && (!FeatureFlags.ZONE_CONTROLLER.getAsBoolean() || m_zoneController.shouldShootHub())
                 && (m_drivetrain.isInAllianceZone() || !FeatureFlags.ALLIANCE_ZONE_GATE.getAsBoolean())
                 && (m_drivetrain.isOurHubActive() || !FeatureFlags.SHIFTS_GATE.getAsBoolean())
-        )
+        ).beforeStarting(() -> SmartDashboard.putString("Shooter/ControlMode", "AUTO HUB/PASS")),
+        manualShotCommand())
+        .finallyDo(() -> SmartDashboard.putString("Shooter/ControlMode", "IDLE"))
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
     m_controller.y().and(teleop).whileTrue(
@@ -619,6 +624,30 @@ public class RobotContainer {
         ),
         lintakePumpCommand()
     )).finallyDo(interrupted -> {
+      stopShooter();
+      m_lintake.setPinionState(PinionState.GROUND);
+      m_lintake.setState(RollerState.ZERO);
+    });
+  }
+
+  // If localization is not ready at the trigger press, keep the robot under manual
+  // yaw control and use an explicit fixed-range shot. Never gate this on field pose.
+  private Command manualShotCommand() {
+    Command shoot = Commands.sequence(
+        Commands.runOnce(() -> {
+          m_lintake.setState(RollerState.AGITATE);
+          m_shooter.startManualShot();
+        }, m_shooter),
+        Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
+        m_shooter.feedWithRecoveryCommand()
+    );
+    return Commands.parallel(
+        Commands.deadline(shoot, lintakePumpCommand()),
+        m_drivetrain.applyRequest(() -> driveRequest
+            .withVelocityX(shootingXVelocity()).withVelocityY(shootingYVelocity())
+            .withRotationalRate(driverRotationalRate())),
+        rumbleWhenReady(m_shooter::readyToShoot)
+    ).finallyDo(() -> {
       stopShooter();
       m_lintake.setPinionState(PinionState.GROUND);
       m_lintake.setState(RollerState.ZERO);

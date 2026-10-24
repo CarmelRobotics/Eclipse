@@ -550,7 +550,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putBoolean("Localization/Ready to aim", isFieldAimingReady());
             SmartDashboard.putString("Localization/Vision status", m_localization.status());
             SmartDashboard.putString("Localization/Aim status", isFieldAimingReady()
-                ? "Ready" : "BLOCKED: initialize alliance, field position, and heading");
+                ? "Ready" : "AUTO AIM BLOCKED; right trigger uses manual preset");
             SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
             SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
             SmartDashboard.putNumber("vision/pose resets", m_visionPoseResets);
@@ -574,7 +574,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             boolean inAllianceZone = isInAllianceZone();
             SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
             SmartDashboard.putString("aim/auto mode",
-                getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
+                !isFieldAimingReady() ? "MANUAL PRESET"
+                    : getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters
                     && inAllianceZone && m_ourHubActive
                     ? "HUB" : "PASS");
 

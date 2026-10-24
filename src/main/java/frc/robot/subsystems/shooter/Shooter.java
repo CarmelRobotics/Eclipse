@@ -73,6 +73,9 @@ public class Shooter extends SubsystemBase {
     private double m_targetPivotPosition = ShooterConstants.kStowPivotPosition;  // in output (pivot) rotations
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
     private double m_targetPassRps = 30;  // distance-interpolated ferry speed
+    private ManualShotPreset m_manualShot;
+    private final LoggedTunableNumber m_manualShotDistance = new LoggedTunableNumber(
+        ManualShotPreset.DISTANCE_KEY, ManualShotPreset.DEFAULT_DISTANCE_METERS);
 
     // ===== Protection =====
     // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
@@ -256,7 +259,7 @@ public class Shooter extends SubsystemBase {
     public void setState(IndexerState indexerState, PivotState pivotState, ShooterState shooterState) {
         m_indexerState = indexerState;
         m_pivotState = pivotState;
-        m_shooterState = shooterState;
+        setState(shooterState);
     }
 
     public void setState(IndexerState indexerState) {
@@ -268,8 +271,22 @@ public class Shooter extends SubsystemBase {
     }
 
     public void setState(ShooterState shooterState) {
+        m_manualShot = null;
         m_shooterState = shooterState;
     }
+
+    /** Driver aims manually. Snapshot a known table preset instead of trusting bad X/Y. */
+    public void startManualShot() {
+        setState(IndexerState.ZERO, PivotState.SCORE, ShooterState.SCORE);
+        m_manualShot = ManualShotPreset.create(m_manualShotDistance.get(),
+            m_pivotOffset.get(), m_shooterRpsOffset.get());
+        m_targetPivotPosition = m_manualShot.pivotRotations();
+        m_targetShooterRps = m_manualShot.wheelRps();
+        SmartDashboard.putString("Shooter/ControlMode", "MANUAL PRESET - aim with right stick");
+        SmartDashboard.putNumber("Shooter/Manual shot distance m", m_manualShot.distanceMeters());
+    }
+
+    public boolean isManualShotActive() { return m_manualShot != null; }
 
     public Command zero(){
         return Commands.runOnce(()->{
@@ -485,8 +502,9 @@ public class Shooter extends SubsystemBase {
     }
 
     public boolean readyToShoot() {
-        boolean shotInRange = m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters;
-        boolean aimed = Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
+        boolean manual = isManualShotActive();
+        boolean shotInRange = manual || m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters;
+        boolean aimed = manual || Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
         boolean shooterReady = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetShooterRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
         // Convert motor position to output (pivot) rotations using gear ratio
@@ -503,7 +521,7 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
         }
 
-        return m_drive.isFieldAimingReady() && shotInRange && aimed && shooterReady && pivotReady;
+        return (manual || m_drive.isFieldAimingReady()) && shotInRange && aimed && shooterReady && pivotReady;
     }
 
     // Pass readiness: unlike readyToShoot(), this gates on the PASS targets -- flywheel
@@ -561,8 +579,8 @@ public class Shooter extends SubsystemBase {
         // The drivetrain computes motion-compensated distance and heading each loop;
         // we interpolate the shot table to get the pivot and RPS for that distance, then
         // add the live offsets so the driver can trim without redeploying.
-        double shotDistance = m_drive.getShotDistance();
-        var trajectorySolution = FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
+        double shotDistance = isManualShotActive() ? m_manualShot.distanceMeters() : m_drive.getShotDistance();
+        var trajectorySolution = !isManualShotActive() && FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
             ? TrajectoryMap.lookup(shotDistance, m_drive.getShotRadialVelocityMetersPerSecond())
             : java.util.Optional.<TrajectoryMap.Solution>empty();
         double nominalPivot = trajectorySolution
@@ -574,6 +592,11 @@ public class Shooter extends SubsystemBase {
         m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(nominalPivot)
             + m_pivotOffset.get();
         m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
+        if (isManualShotActive()) {
+            // No odometry/motion/tilt compensation or live mid-hold preset changes.
+            m_targetPivotPosition = m_manualShot.pivotRotations();
+            m_targetShooterRps = m_manualShot.wheelRps();
+        }
         m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
 
         // === Live flywheel gain re-tuning ===
@@ -780,6 +803,7 @@ public class Shooter extends SubsystemBase {
         }
         if (RobotLogger.shouldLogPeriodic()) {
             RobotLogger.log("Shooter/ShotDistanceM", shotDistance);
+            RobotLogger.log("Shooter/ManualPreset", isManualShotActive());
             RobotLogger.log("Shooter/HubHeadingErrorDeg", m_drive.getHubHeadingError().getDegrees());
             RobotLogger.log("Shooter/TargetPivotRot", m_targetPivotPosition);
             RobotLogger.log("Shooter/ActualPivotRot", pivotOutputRot);
@@ -819,6 +843,7 @@ public class Shooter extends SubsystemBase {
         double headingErrDeg = m_drive.getHubHeadingError().getDegrees();
         RobotLogger.log("Shooter/ShotEvent/Number", m_shotCount);
         RobotLogger.log("Shooter/ShotEvent/Mode", m_shooterState.toString());
+        RobotLogger.log("Shooter/ShotEvent/ManualPreset", isManualShotActive());
         RobotLogger.log("Shooter/ShotEvent/DistanceM", distance);
         RobotLogger.log("Shooter/ShotEvent/CommandedRps", commandedRps);
         RobotLogger.log("Shooter/ShotEvent/ActualRps", actualRps);

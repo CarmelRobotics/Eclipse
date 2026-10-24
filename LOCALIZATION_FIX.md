@@ -11,8 +11,9 @@ the Limelight API to `wpired` or reflect odometry just because the DS reports Re
    field heading (Blue 0 degrees / Red 180 degrees), independent of our deliberately
    reversed driver-stick perspective. Never press it in an arbitrary orientation.
 3. Valid stationary camera frames establish X/Y without an auto. Verify
-   `Localization/Ready to aim` is true. If a shot was held while blocked, release and
-   press again after initialization; the shot sequence does not restart itself.
+   `Localization/Ready to aim` is true for automatic aiming. AUTO/MANUAL selection
+   latches per right-trigger press; release and press again after initialization to
+   switch out of the manual fallback.
 
 A PathPlanner full-pose reset initializes X/Y and heading automatically; do not apply
 this downfield reset during/after an auto unless physically pointing downfield.
@@ -33,10 +34,19 @@ this downfield reset during/after an auto unless physically pointing downfield.
   rather than teleporting the pose. Large corrections can be acquired while stationary
   and disabled. Normal nearby measurements still fuse; losing tags retains odometry.
 - Vision initialization changes X/Y only. It does not silently trust camera yaw.
-- Until position, heading, and alliance are initialized, A/right-trigger/pass aiming
-  uses manual stick rotation and position-dependent shooting is blocked, including
-  the spin-up timeout path. Ordinary driving/intake and the existing manual ferry
-  remain available. This is **not** a new manual hub-shot mode.
+- Until position, heading, and alliance are initialized, automatic aiming and
+  position-dependent shooting remain blocked, including the auto spin-up timeout
+  path. **Right trigger does not become a dead button:** it selects a manually aimed
+  fixed-range hub shot, preserving manual joystick rotation. Default range is **2.75 m**
+  (existing shot table, not a new ballistic model). `ShotTuning/ManualShotDistanceM`
+  can be set from 1.5 to 5 m **before** pressing the trigger. Range and existing pivot/RPS
+  trims snapshot at the press and stay unchanged for that hold. This is not automatic
+  range estimation: the driver must aim and shoot from the selected approximate range.
+- `Shooter/ControlMode` explicitly shows AUTO HUB/PASS versus MANUAL PRESET; `aim/auto mode`
+  also reports MANUAL PRESET when unlocalized. A manual shot starts spinning immediately,
+  then follows the existing readiness-or-1.25-second-timeout feed/recovery sequence.
+  Release stops feed and clears manual targets; the normal low-speed idle pre-spin may
+  remain. Ordinary driving/intake and the separate manual ferry are unchanged.
 - `Sim/ApplyPose` cannot move a real robot's estimate. `active hub alliance` now displays
   Both/Neither where applicable, rather than mislabeling both-active periods as Blue.
 
@@ -52,9 +62,14 @@ with Phoenix simulation. They also verify stationary aim-request bearings on bot
 alliances. Existing auto/path tests remain enabled. These are synthetic camera inputs,
 not validation of the physical Limelight or event field.
 
+The right-trigger regression test constructs the actual RobotContainer, simulates an
+Xbox trigger in teleop with no localization, and checks the native flywheel velocity
+request, indexer feed, release cleanup, fixed-preset latching, and automatic selection
+on a subsequent localized press. No desktop, robot, or camera connection is started.
+
 **This code cannot repair a wrong field map, physically swapped tag IDs, camera
 mounting calibration, or a different/stale deployed binary.** If the camera keeps
-reporting the opposite starting half, aiming stays blocked with an explicit map/tag
+reporting the opposite starting half, **automatic** aiming stays blocked with an explicit map/tag
 warning; it does not guess a reflection. The uploaded Limelight field map must match
 the actual event, hostname must be `limelight-four`, and networking must match team
 9995. No camera settings or robot deployment were performed by this change.
