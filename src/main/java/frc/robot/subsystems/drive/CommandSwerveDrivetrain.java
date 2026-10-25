@@ -573,11 +573,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putNumber("pass/distance", getPassDistance());
             SmartDashboard.putBoolean("our hub active", m_ourHubActive);
 
-            // Right trigger is a fixed, manually aimed tower shot, not a pose-based
-            // hub/pass selector. Keep the diagnostic consistent with the actual binding.
+            // Right trigger never uses global field pose for range or chassis yaw.
             boolean inAllianceZone = isInAllianceZone();
             SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
-            SmartDashboard.putString("aim/auto mode", "TOWER PRESET");
+            SmartDashboard.putString("aim/auto mode", "VISION RANGE / A+TRIGGER TOWER");
 
             // Compute which alliance currently has active hub (Blue or Red)
             boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);

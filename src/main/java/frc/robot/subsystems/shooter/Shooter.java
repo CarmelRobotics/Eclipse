@@ -74,6 +74,9 @@ public class Shooter extends SubsystemBase {
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
     private double m_targetPassRps = 30;  // distance-interpolated ferry speed
     private ManualShotPreset m_manualShot;
+    private final VisionHubRange m_visionRange = new VisionHubRange();
+    private boolean m_visionShot;
+    private double m_visionPivotTrim, m_visionRpsTrim;
 
     // ===== Protection =====
     // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
@@ -270,8 +273,21 @@ public class Shooter extends SubsystemBase {
 
     public void setState(ShooterState shooterState) {
         m_manualShot = null;
+        m_visionShot = false;
         m_shooterState = shooterState;
     }
+
+    /** Vision controls range only; the driver still controls yaw. No automatic tower fallback. */
+    public void startVisionShot() {
+        setState(IndexerState.ZERO, PivotState.SCORE, ShooterState.SCORE);
+        m_visionShot = true;
+        m_visionPivotTrim = m_pivotOffset.get();
+        m_visionRpsTrim = m_shooterRpsOffset.get();
+        m_targetShooterRps = 0;
+        m_targetPivotPosition = ShooterConstants.kStowPivotPosition;
+    }
+
+    public boolean isVisionShotActive() { return m_visionShot; }
 
     /** Driver aims manually; fixed tower range and trims latch until trigger release. */
     public void startTowerShot() {
@@ -331,6 +347,12 @@ public class Shooter extends SubsystemBase {
     }
 
     private void runFeedWithRecovery() {
+        // A timeout must NEVER force-feed a vision shot with missing/stale range.
+        // Recheck mechanical readiness as the live distance/targets change.
+        if (m_visionShot && !readyToShoot()) {
+            stopFeedWithRecovery();
+            return;
+        }
         double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
         if (m_feedRecoveryPhase == FeedRecoveryPhase.IDLE) {
             m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
@@ -502,8 +524,9 @@ public class Shooter extends SubsystemBase {
 
     public boolean readyToShoot() {
         boolean manual = isManualShotActive();
-        boolean shotInRange = manual || m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters;
-        boolean aimed = manual || !m_drive.isAutoAlignmentEnabled()
+        boolean shotInRange = manual || (m_visionShot ? m_visionRange.isValid()
+            : m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters);
+        boolean aimed = manual || m_visionShot || !m_drive.isAutoAlignmentEnabled()
             || Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
         boolean shooterReady = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetShooterRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
@@ -521,7 +544,8 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
         }
 
-        return (manual || m_drive.isFieldAimingReady()) && shotInRange && aimed && shooterReady && pivotReady;
+        return (manual || (m_visionShot ? m_visionRange.isValid() : m_drive.isFieldAimingReady()))
+            && shotInRange && aimed && shooterReady && pivotReady;
     }
 
     // Pass readiness: unlike readyToShoot(), this gates on the PASS targets -- flywheel
@@ -574,13 +598,16 @@ public class Shooter extends SubsystemBase {
     @Override
     public void periodic() {
         m_diagLoopCount++;
+        m_visionRange.update(edu.wpi.first.wpilibj.Timer.getFPGATimestamp());
 
         // === Update shot targets from drivetrain compensation ===
         // The drivetrain computes motion-compensated distance and heading each loop;
         // we interpolate the shot table to get the pivot and RPS for that distance, then
         // add the live offsets so the driver can trim without redeploying.
-        double shotDistance = isManualShotActive() ? m_manualShot.distanceMeters() : m_drive.getShotDistance();
-        var trajectorySolution = !isManualShotActive() && FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
+        double shotDistance = isManualShotActive() ? m_manualShot.distanceMeters()
+            : m_visionShot ? (m_visionRange.isValid() ? m_visionRange.distanceMeters() : 0)
+            : m_drive.getShotDistance();
+        var trajectorySolution = !isManualShotActive() && !m_visionShot && FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
             ? TrajectoryMap.lookup(shotDistance, m_drive.getShotRadialVelocityMetersPerSecond())
             : java.util.Optional.<TrajectoryMap.Solution>empty();
         double nominalPivot = trajectorySolution
@@ -589,9 +616,22 @@ public class Shooter extends SubsystemBase {
         double nominalRps = trajectorySolution
             .map(TrajectoryMap.Solution::wheelRps)
             .orElseGet(() -> ShooterConstants.getScoreShooterRps(shotDistance));
-        m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(nominalPivot)
-            + m_pivotOffset.get();
-        m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
+        if (!m_visionShot) {
+            m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(nominalPivot)
+                + m_pivotOffset.get();
+            m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
+        } else if (m_visionRange.isValid()) {
+            var preset = ManualShotPreset.create(shotDistance, m_visionPivotTrim, m_visionRpsTrim);
+            m_targetPivotPosition = preset.pivotRotations();
+            m_targetShooterRps = preset.wheelRps();
+        }
+        if (diagLoop()) {
+            SmartDashboard.putBoolean("Shooter/VisionRange/Valid", m_visionRange.isValid());
+            SmartDashboard.putNumber("Shooter/VisionRange/DistanceM", m_visionRange.isValid()
+                ? m_visionRange.distanceMeters() : 0);
+            if (m_visionShot) SmartDashboard.putString("Shooter/ControlMode", m_visionRange.isValid()
+                ? "VISION RANGE - manual aim" : "VISION LOST - A + trigger for tower preset");
+        }
         if (isManualShotActive()) {
             // No odometry/motion/tilt compensation or live mid-hold preset changes.
             m_targetPivotPosition = m_manualShot.pivotRotations();

@@ -39,7 +39,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class TeleopShotRegressionTest {
   @ParameterizedTest
   @EnumSource(value = AllianceStationID.class, names = {"Blue1", "Red1"})
-  void rightTriggerUsesTowerPresetAndAllTeleopAimButtonsPreserveManualYaw(AllianceStationID station)
+  void visionRangeAndExplicitTowerFallbackPreserveManualYaw(AllianceStationID station)
       throws Exception {
     assertTrue(HAL.initialize(500, 0));
     SimHooks.resumeTiming();
@@ -56,6 +56,10 @@ class TeleopShotRegressionTest {
     refresh();
     NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name()).getEntry("botpose_wpiblue")
         .setDoubleArray(new double[11]);
+    var camera = NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name());
+    camera.getEntry("tv").setDouble(0);
+    camera.getEntry("botpose_targetspace").setDoubleArray(new double[0]);
+    camera.getEntry("rawfiducials").setDoubleArray(new double[0]);
     // An old dashboard value must not override the newly compiled tower range.
     SmartDashboard.putNumber("ShotTuning/ManualShotDistanceM", 2.75);
     SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
@@ -83,13 +87,62 @@ class TeleopShotRegressionTest {
       DriverStationSim.setAutonomous(false);
       tick(scheduler, 3);
       assertFalse(drive.isFieldAimingReady());
+      // Missing vision must not fall back to the tower range or force-feed after timeout.
+      controller.setRightTriggerAxis(1);
+      tick(scheduler, 70);
+      assertTrue(shooter.isVisionShotActive());
+      assertFalse(shooter.isManualShotActive());
+      assertFalse(shooter.readyToShoot());
+      assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
+      assertEquals(0, assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
+      // Blue hub tag is accepted even with FMS Red: only range is used; no field-pose target selection.
+      tickVision(scheduler, camera, 3.0, 4);
+      verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
+      var visionPreset = ManualShotPreset.create(3, 0, 0);
+      for (int i = 0; i < 12; i++) {
+        // Raw rotor simulation is pre-inversion; both leader motors are Clockwise_Positive.
+        flywheel.getSimState().setRotorVelocity(-visionPreset.wheelRps());
+        pivot.getSimState().setRawRotorPosition(-visionPreset.pivotRotations() * ShooterConstants.kPivotGearRatio);
+        flywheel.getVelocity().refresh();
+        pivot.getPosition().refresh();
+        tickVision(scheduler, camera, 3.0, 1);
+        if (shooter.readyToShoot()) break;
+      }
+      assertTrue(shooter.readyToShoot(), () -> "Fresh vision must permit ready: velocity="
+          + flywheel.getVelocity().getValueAsDouble() + ", pivot=" + pivot.getPosition().getValueAsDouble()
+          + ", range=" + SmartDashboard.getBoolean("Shooter/VisionRange/Valid", false));
+      tickVision(scheduler, camera, 3.0, 1);
+      assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"));
+      drive.resetPose(new Pose2d(14, 2, Rotation2d.fromDegrees(37)));
+      controller.setRightX(.25);
+      tickVision(scheduler, camera, 3.0, 3);
+      verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
+      verifyManualYaw(drive, snap, towerDrive);
+      publishVision(camera, 3.4);
+      tick(scheduler, 2);
+      verifyRangeTargets(flywheel, pivot, 3.1, 0, 0); // 0.25 low-pass step, not a raw jump.
+      tick(scheduler, 18); // No fresh frame: stale data must stop feed, never select tower.
+      assertFalse(shooter.readyToShoot());
+      assertFalse(shooter.isManualShotActive());
+      assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
+      controller.setRightTriggerAxis(0);
+      controller.setRightX(0);
+      tick(scheduler, 3);
+      assertFalse(shooter.isVisionShotActive());
+      flywheel.getSimState().setRotorVelocity(0);
+      pivot.getSimState().setRawRotorPosition(0);
+      tick(scheduler, 3);
+      flywheel.getVelocity().refresh();
+      pivot.getPosition().refresh();
+      // Explicit fallback: A must be held before pulling the trigger.
+      controller.setAButton(true);
       controller.setRightTriggerAxis(1);
       tick(scheduler, 6);
       assertTrue(shooter.isManualShotActive(), "Uninitialized pose must not swallow trigger press");
       verifyTowerTargets(flywheel, pivot, 0, 0);
       assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"), "Do not feed before spin-up");
       assertEquals("TOWER PRESET - aim with right stick", SmartDashboard.getString("Shooter/ControlMode", ""));
-      assertEquals("TOWER PRESET", SmartDashboard.getString("aim/auto mode", ""));
+      assertEquals("VISION RANGE / A+TRIGGER TOWER", SmartDashboard.getString("aim/auto mode", ""));
       // Acquiring position/heading and editing the dashboard while held must NOT
       // switch to auto-aim or change the tower shot's already-latched preset/trims.
       drive.resetPose(new Pose2d(14, 2, Rotation2d.k180deg));
@@ -174,6 +227,7 @@ class TeleopShotRegressionTest {
         }
       }
       AutoBuilder.resetForTesting();
+      camera.getEntry("tv").setDouble(0);
       SmartDashboard.putNumber("ShotTuning/ManualShotDistanceM", 2.75);
       SmartDashboard.putNumber(ShooterConstants.kPivotOffsetKey, 0);
       SmartDashboard.putNumber(ShooterConstants.kShooterRpsOffsetKey, 0);
@@ -211,11 +265,36 @@ class TeleopShotRegressionTest {
 
   private static void verifyTowerTargets(TalonFX flywheel, TalonFX pivot,
       double pivotTrim, double rpsTrim) {
-    var expected = ManualShotPreset.tower(pivotTrim, rpsTrim);
+    verifyRangeTargets(flywheel, pivot, ShooterConstants.kTowerShotDistanceMeters, pivotTrim, rpsTrim);
+  }
+
+  private static void verifyRangeTargets(TalonFX flywheel, TalonFX pivot, double distance,
+      double pivotTrim, double rpsTrim) {
+    var expected = ManualShotPreset.create(distance, pivotTrim, rpsTrim);
     assertEquals(expected.wheelRps(),
         assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
     assertEquals(expected.pivotRotations() * ShooterConstants.kPivotGearRatio,
         assertInstanceOf(MotionMagicVoltage.class, pivot.getAppliedControl()).Position, .0001);
+  }
+
+  private static void publishVision(edu.wpi.first.networktables.NetworkTable camera, double distance) {
+    // Distinct frames despite constant range: NT suppresses identical array updates.
+    double marker = Timer.getFPGATimestamp() * 1e-8;
+    camera.getEntry("tv").setDouble(1);
+    camera.getEntry("tid").setDouble(26);
+    camera.getEntry("tl").setDouble(0);
+    camera.getEntry("cl").setDouble(0);
+    camera.getEntry("rawfiducials").setDoubleArray(new double[] {26, marker, 0, 2, distance, distance, .05});
+    // Tag 26 is centered on the blue alliance-facing face, 0.603758 m in front of hub center.
+    camera.getEntry("botpose_targetspace").setDoubleArray(new double[] {0, 1.12395, distance - .603758, 0, 0, marker});
+  }
+
+  private static void tickVision(CommandScheduler scheduler,
+      edu.wpi.first.networktables.NetworkTable camera, double distance, int frames) {
+    for (int i = 0; i < frames; i++) {
+      publishVision(camera, distance);
+      tick(scheduler, 1);
+    }
   }
 
   private static Object field(Object object, String name) throws Exception {

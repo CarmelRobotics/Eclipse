@@ -298,17 +298,17 @@ public class RobotContainer {
         rollerWhileHeldCommand(RollerState.EJECT)
     );
 
-    m_controller.a().and(teleop).whileTrue(
+    m_controller.a().and(teleop).and(m_controller.rightTrigger().negate()).whileTrue(
         Commands.parallel(
             m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
             rumbleWhenReady(m_shooter::readyToShoot)
         )
     );
-    // Right trigger always uses the fixed tower-shot range, on both alliances and
-    // with or without localization. No automatic range/pass/shift selection: the
-    // driver chooses where/when to shoot and retains manual chassis rotation.
+    // Right trigger: hub-tag vision range only. Hold A BEFORE pulling the trigger
+    // for the explicit fixed tower fallback. Choice latches until release.
+    // Neither mode controls yaw or uses global field pose / automatic passing.
     m_controller.rightTrigger().and(teleop).whileTrue(
-        heldTowerShotCommand()
+        Commands.either(heldTeleopShotCommand(true), heldTeleopShotCommand(false), m_controller.a())
             .finallyDo(() -> SmartDashboard.putString("Shooter/ControlMode", "IDLE"))
     );
     // While Y is held, move shooter pivot to clear the shot blocker and stow the lintake.
@@ -604,13 +604,13 @@ public class RobotContainer {
     });
   }
 
-  // Fixed tower preset for every teleop trigger press. Never gate it on field pose
-  // or let distance, tags, alliance, or motion compensation change the latched targets.
-  private Command heldTowerShotCommand() {
+  // Both modes bypass global localization; only the driver can select the tower preset.
+  private Command heldTeleopShotCommand(boolean towerPreset) {
     Command shoot = Commands.sequence(
         Commands.runOnce(() -> {
           m_lintake.setState(RollerState.AGITATE);
-          m_shooter.startTowerShot();
+          if (towerPreset) m_shooter.startTowerShot();
+          else m_shooter.startVisionShot();
         }, m_shooter),
         Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
         m_shooter.feedWithRecoveryCommand()
