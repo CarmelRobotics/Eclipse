@@ -627,10 +627,24 @@ public class Shooter extends SubsystemBase {
         }
         if (diagLoop()) {
             SmartDashboard.putBoolean("Shooter/VisionRange/Valid", m_visionRange.isValid());
+            SmartDashboard.putString("Shooter/VisionRange/Status", m_visionRange.status());
+            SmartDashboard.putNumber("Shooter/VisionRange/TagId", m_visionRange.observedTagId());
+            SmartDashboard.putNumber("Shooter/VisionRange/FrameAgeS", m_visionRange.frameAgeSeconds());
             SmartDashboard.putNumber("Shooter/VisionRange/DistanceM", m_visionRange.isValid()
                 ? m_visionRange.distanceMeters() : 0);
             if (m_visionShot) SmartDashboard.putString("Shooter/ControlMode", m_visionRange.isValid()
                 ? "VISION RANGE - manual aim" : "VISION LOST - A + trigger for tower preset");
+            if (m_visionShot) {
+                double wheelError = m_targetShooterRps - m_leftLeaderShooterMotor.getVelocity().getValueAsDouble();
+                double pivotError = m_targetPivotPosition
+                    - m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
+                SmartDashboard.putString("Shooter/ShotBlockReason", !m_visionRange.isValid() ? m_visionRange.status()
+                    : Math.abs(wheelError) > ShooterConstants.kShooterReadyToleranceRps ? "Flywheel not at speed"
+                    : Math.abs(pivotError) > ShooterConstants.kPivotReadyToleranceRotations ? "Pivot not at target"
+                    : "Ready");
+                SmartDashboard.putNumber("Shooter/ShotWheelErrorRps", wheelError);
+                SmartDashboard.putNumber("Shooter/ShotPivotErrorRot", pivotError);
+            }
         }
         if (isManualShotActive()) {
             // No odometry/motion/tilt compensation or live mid-hold preset changes.

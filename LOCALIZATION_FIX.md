@@ -24,8 +24,13 @@ It uses neither robot field X/Y nor field heading nor FMS alliance selection. A 
 global pose therefore cannot change this range. Of valid camera observations, the
 closest observed hub range is selected. The configured camera name is **limelight**.
 
-Range must be 1.5-5 m, ambiguity at most 0.2, and frame age at most 0.25 s; mismatched
-pose/quality packets, bad numbers and large isolated jumps are rejected. New frames are
+Range must be 1.5-5 m, ambiguity at most 0.2, and frame age at most 0.25 s. Camera frame
+freshness uses Limelight's per-frame `hb` heartbeat where available, with fresh-pose
+timestamps as a compatibility fallback. Independent pose/quality NT topics do NOT need
+last-change times within 50 ms: unchanged arrays are legitimate while the heartbeat
+advances. A frozen heartbeat is rejected even if another topic changes; switching the
+primary tag cannot reuse a stale pose for the previous tag. Bad numbers and large
+isolated range jumps are rejected. New frames are
 low-pass filtered. Existing pivot/RPS trims latch on the trigger press; no odometry,
 shoot-on-the-move, trajectory-map, gyro or tilt compensation enters the vision targets.
 The camera's robot-space mounting calibration and the event's tag IDs must be correct.
@@ -38,6 +43,12 @@ after mechanical readiness. Dashboard `Shooter/VisionRange/Valid`, `DistanceM`, 
 `Shooter/ControlMode` indicate the source/status. There is no automatic tower fallback:
 release, hold A, then re-pull the trigger **from the tower shooting position**.
 Without visible hub tags the camera-relative mode cannot range using tower/trench tags.
+
+If a visible tag does not result in shooting, read `Shooter/ShotBlockReason` and
+`Shooter/VisionRange/Status`, `TagId`, and `FrameAgeS`. These distinguish a non-hub tag,
+missing 3D output, stale camera, poor quality, out-of-range shot, flywheel not at speed,
+and pivot not at target. `Shooter/ShotWheelErrorRps` and `ShotPivotErrorRot` show the
+mechanical errors. These diagnostics remain decimated to 10 Hz.
 
 ### Fixed tower-shot starting point
 
