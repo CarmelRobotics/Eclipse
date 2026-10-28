@@ -1,4 +1,11 @@
-# Teleop localization / wrong-hub hotfix
+# Historical localization hotfix notes (superseded)
+
+**Do not use the controls/configuration below as the current instructions.** They
+describe the 2026-10-25 implementation and are retained as implementation history.
+The 2026-10-28 rebuild restores chassis auto-alignment, uses atomic blue-origin camera
+frames from any field tags, and replaces the split-topic `VisionHubRange` reader.
+See [COMPETITION_VISION.md](COMPETITION_VISION.md) for current controls, limits, tests,
+and the required hardware acceptance procedure. Past test counts below are historical.
 
 All poses remain in **blue-origin field coordinates on both alliances**. Do not change
 the Limelight API to `wpired` or reflect odometry just because the DS reports Red.

@@ -48,8 +48,9 @@ import frc.robot.subsystems.power.DriveCurrentPolicy;
 import frc.robot.subsystems.drive.TunerConstants.TunerSwerveDrivetrain;
 import frc.robot.subsystems.localisation.LimelightHelpers;
 import frc.robot.subsystems.localisation.FieldLocalization;
-import frc.robot.subsystems.localisation.LimelightInfo;
-import frc.robot.subsystems.localisation.LocalisationConstants;
+import frc.robot.subsystems.localisation.VisionObservation;
+import frc.robot.subsystems.localisation.VisionSystem;
+import frc.robot.subsystems.shooter.VisionAimTracker;
 import frc.robot.subsystems.shooter.ShooterConstants;
 import frc.robot.util.LoggedTunableNumber;
 import frc.robot.util.RobotLogger;
@@ -68,6 +69,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private final SwerveRequest.FieldCentricFacingAngle snapRequest = new SwerveRequest.FieldCentricFacingAngle();
     private final SwerveRequest.FieldCentric m_unlocalizedDrive = new SwerveRequest.FieldCentric();
     private final FieldLocalization m_localization = new FieldLocalization();
+    private final VisionSystem m_vision = new VisionSystem();
+    private final VisionAimTracker m_visionAim = new VisionAimTracker();
+    private boolean m_manualAimOverride;
+    private double m_visionAimOmega, m_lastAimCommandTime;
+    private double m_activeVisionHeadingTrimDeg = 6.7;
     private Pose2d m_rawVisionPose = Pose2d.kZero;
     private double m_rawVisionAge = -1;
     // Counts how many times vision has reset the pose. If this isn't climbing while a
@@ -465,20 +471,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // across the field by one distant/mirrored vision measurement.
         boolean hubVisible = false;
         double visionNow = Timer.getFPGATimestamp();
-        for (LimelightInfo limelight : LocalisationConstants.kLimelights) {
-            // Give the camera our heading + yaw rate (needed if we ever switch to MegaTag2;
-            // harmless for the MegaTag1 botpose read below).
-            LimelightHelpers.SetRobotOrientation(
-                    limelight.name(), getState().Pose.getRotation().getDegrees(),
-                    getPigeon2().getAngularVelocityZWorld().getValueAsDouble(),
-                    getPigeon2().getPitch().getValueAsDouble(),
-                    getPigeon2().getAngularVelocityYWorld().getValueAsDouble(),
-                    getPigeon2().getRoll().getValueAsDouble(),
-                    getPigeon2().getAngularVelocityXWorld().getValueAsDouble()
-                );
-
-            final LimelightHelpers.PoseEstimate estimate =
-                LimelightHelpers.getBotPoseEstimate_wpiBlue(limelight.name());
+        m_vision.update(visionNow);
+        VisionObservation aimObservation = null;
+        for (int camera = 0; camera < m_vision.cameraCount(); camera++) {
+            VisionObservation observation = m_vision.observation(camera);
+            final LimelightHelpers.PoseEstimate estimate = observation == null ? null : observation.poseEstimate();
+            if (observation != null && (aimObservation == null
+                    || observation.captureTime() > aimObservation.captureTime())) aimObservation = observation;
 
             hubVisible |= FieldLocalization.fresh(estimate, visionNow)
                 && estimate != null && estimate.tagCount > 0;
@@ -522,6 +521,18 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 SmartDashboard.putNumber("pose heading deg", getState().Pose.getRotation().getDegrees());
             }
         }
+        m_visionAim.update(visionNow, getState().Speeds, aimObservation);
+        if (diagLoop) {
+            SmartDashboard.putString("Vision/InputStatus", m_vision.status(0));
+            SmartDashboard.putString("Vision/Camera", m_vision.cameraName(0));
+            SmartDashboard.putNumber("Vision/TagCount", aimObservation == null ? 0 : aimObservation.tagCount());
+            SmartDashboard.putString("Vision/AimStatus", getVisionAimStatus());
+            SmartDashboard.putNumber("Vision/AcceptedFrames", m_vision.acceptedFrames());
+            SmartDashboard.putNumber("Vision/RejectedFrames", m_vision.rejectedFrames());
+            SmartDashboard.putNumber("Vision/TargetAgeS", m_visionAim.ageSeconds());
+            SmartDashboard.putNumber("Vision/RobotRelativeBearingDeg", getVisionAimErrorDegrees());
+            SmartDashboard.putBoolean("Vision/DriverOverride", m_manualAimOverride);
+        }
 
         // Solve the shoot-on-the-move aim for this loop (after vision so it uses the
         // freshest pose). Everything downstream -- getHubHeading, getShotDistance,
@@ -554,8 +565,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putBoolean("Localization/Ready to aim", isFieldAimingReady());
             SmartDashboard.putString("Localization/Vision status", m_localization.status());
             SmartDashboard.putString("Localization/Aim status", isFieldAimingReady()
-                ? (isAutoAlignmentEnabled() ? "Ready" : "AUTO-ALIGN DISABLED - manual rotation")
-                : "AUTO AIM BLOCKED; right trigger uses manual preset");
+                ? "Global pose referenced (auto/pass ready)"
+                : "Global heading unreferenced; teleop vision aim is independent");
             SmartDashboard.putBoolean("Drivetrain/Teleop auto-align enabled", Constants.kTeleopAutoAlignEnabled);
             SmartDashboard.putNumber("dist to hub", this.getDistanceToClosestHub());
             SmartDashboard.putBoolean("hub visible", hubVisible);  // True if any tags detected
@@ -573,10 +584,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putNumber("pass/distance", getPassDistance());
             SmartDashboard.putBoolean("our hub active", m_ourHubActive);
 
-            // Right trigger never uses global field pose for range or chassis yaw.
+            // Teleop uses the camera's relative target, not the fused odometry estimate.
             boolean inAllianceZone = isInAllianceZone();
             SmartDashboard.putBoolean("aim/in alliance zone", inAllianceZone);
-            SmartDashboard.putString("aim/auto mode", "VISION RANGE / A+TRIGGER TOWER");
+            SmartDashboard.putString("aim/auto mode", "VISION AUTO-AIM / A+TRIGGER MANUAL TOWER");
 
             // Compute which alliance currently has active hub (Blue or Red)
             boolean blueHubActive = computeHubActiveForAlliance(Alliance.Blue, matchTime, gameData);
@@ -973,7 +984,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // it once at ball release, never inside the target the controller is chasing.
     public Rotation2d getHubHeading() {
         return getMotionCompensatedShotVector().getAngle()
-            .plus(Rotation2d.fromDegrees(m_headingOffsetDeg.get()));
+            .plus(Rotation2d.fromDegrees(safeHeadingTrimDegrees()));
     }
 
     // === Heading error ===
@@ -985,6 +996,66 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         );
     }
 
+    public VisionAimTracker getVisionAim() { return m_visionAim; }
+
+    public String getVisionAimStatus() {
+        return m_visionAim.valid() || m_vision.status(0).equals("Valid atomic camera frame")
+            ? m_visionAim.status() : m_vision.status(0);
+    }
+
+    public double getVisionAimErrorDegrees() {
+        return Math.toDegrees(m_visionAim.bearingErrorRadians(m_activeVisionHeadingTrimDeg));
+    }
+
+    private double safeHeadingTrimDegrees() {
+        double value = m_headingOffsetDeg.get();
+        return Double.isFinite(value) ? MathUtil.clamp(value, -20, 20) : 6.7;
+    }
+
+    public String getVisionFeedBlockReason() {
+        if (!m_visionAim.inRange()) return getVisionAimStatus();
+        if (m_manualAimOverride) return "Driver rotation override";
+        if (Math.abs(getVisionAimErrorDegrees()) > ShooterConstants.kHeadingReadyToleranceDegrees)
+            return "Aligning chassis to hub";
+        var speeds = getState().Speeds;
+        if (!Double.isFinite(speeds.vxMetersPerSecond) || !Double.isFinite(speeds.vyMetersPerSecond)
+            || !Double.isFinite(speeds.omegaRadiansPerSecond)) return "Chassis motion feedback invalid";
+        if (Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond) > ShooterConstants.kVisionShotMaxLinearSpeed)
+            return "Slow down for calibrated stationary shot";
+        if (Math.abs(speeds.omegaRadiansPerSecond) > ShooterConstants.kVisionShotMaxAngularSpeed)
+            return "Waiting for chassis rotation to settle";
+        double pitch = getPigeon2().getPitch().getValueAsDouble();
+        double roll = getPigeon2().getRoll().getValueAsDouble();
+        if (!Double.isFinite(pitch) || !Double.isFinite(roll)) return "Chassis tilt feedback invalid";
+        if (Math.abs(pitch) > ShooterConstants.kVisionShotMaxTiltDegrees
+            || Math.abs(roll) > ShooterConstants.kVisionShotMaxTiltDegrees)
+            return "Level the robot before shooting";
+        return "Ready";
+    }
+
+    public boolean isVisionAimReady() { return getVisionFeedBlockReason().equals("Ready"); }
+
+    private double visionAimOmega(double manualRotation) {
+        double now = Timer.getFPGATimestamp();
+        double dt = MathUtil.clamp(now - m_lastAimCommandTime, 0, .04);
+        m_lastAimCommandTime = now;
+        if (!Double.isFinite(manualRotation)) {
+            m_manualAimOverride = true;
+            m_visionAimOmega = 0;
+            return 0;
+        }
+        m_manualAimOverride = Math.abs(manualRotation) > .08 * Constants.kMaxAngularRate;
+        if (m_manualAimOverride || !Constants.kTeleopAutoAlignEnabled || !m_visionAim.inRange()) {
+            m_visionAimOmega = 0;
+            return m_manualAimOverride ? manualRotation : 0;
+        }
+        double desired = MathUtil.clamp(ShooterConstants.kVisionAimKp
+            * m_visionAim.bearingErrorRadians(m_activeVisionHeadingTrimDeg),
+            -ShooterConstants.kVisionAimMaxOmega, ShooterConstants.kVisionAimMaxOmega);
+        m_visionAimOmega += MathUtil.clamp(desired - m_visionAimOmega, -6 * dt, 6 * dt);
+        return m_visionAimOmega;
+    }
+
     // === Face hub command ===
     // Heading-locked drive: the heading snaps to the computed hub heading (with PID stiffness),
     // while the driver retains full translation control. Used during aiming and charging shots.
@@ -994,7 +1065,14 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public Command faceHubCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity,
             Supplier<Double> manualRotation) {
-        return applyRequest(() -> isAutoAlignmentEnabled() && isFieldAimingReady() ? snapRequest
+        return applyRequest(() -> {
+            if (DriverStation.isTeleopEnabled()) {
+                return m_unlocalizedDrive.withVelocityX(xVelocity.get()).withVelocityY(yVelocity.get())
+                    .withRotationalRate(visionAimOmega(manualRotation.get()))
+                    .withDeadband(Constants.kMaxSpeed * .1)
+                    .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+            }
+            return isAutoAlignmentEnabled() && isFieldAimingReady() ? snapRequest
             .withVelocityX(xVelocity.get())
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
@@ -1002,8 +1080,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             .withTargetDirection(fieldToOperatorBearing(getHubHeading()))
             : m_unlocalizedDrive.withVelocityX(xVelocity.get()).withVelocityY(yVelocity.get())
                 .withRotationalRate(manualRotation.get()).withDeadband(Constants.kMaxSpeed * 0.1)
-                .withDriveRequestType(DriveRequestType.OpenLoopVoltage)
-        );
+                .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+        }).beforeStarting(() -> {
+            m_visionAim.rearm();
+            m_activeVisionHeadingTrimDeg = safeHeadingTrimDegrees();
+            m_visionAimOmega = 0;
+            m_lastAimCommandTime = Timer.getFPGATimestamp();
+            m_manualAimOverride = false;
+        }).finallyDo(() -> {
+            m_visionAimOmega = 0;
+            m_manualAimOverride = false;
+        });
     }
 
     // === Passing target ===
@@ -1047,7 +1134,9 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public Command facePassTargetCommand(Supplier<Double> xVelocity, Supplier<Double> yVelocity,
             Supplier<Double> manualRotation) {
-        return applyRequest(() -> isAutoAlignmentEnabled() && isFieldAimingReady() ? snapRequest
+        return applyRequest(() -> isAutoAlignmentEnabled() && isFieldAimingReady()
+            && (!DriverStation.isTeleopEnabled()
+                || Math.abs(manualRotation.get()) <= .08 * Constants.kMaxAngularRate) ? snapRequest
             .withVelocityX(xVelocity.get())
             .withVelocityY(yVelocity.get())
             .withDeadband(Constants.kMaxSpeed * 0.1)
@@ -1090,6 +1179,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     @Override
     public Optional<Pose2d> samplePoseAt(double timestampSeconds) {
         return super.samplePoseAt(Utils.fpgaToCurrentTime(timestampSeconds));
+    }
+
+    @Override public void close() {
+        m_vision.close();
+        if (m_simNotifier != null) m_simNotifier.close();
+        super.close();
     }
 }
 

@@ -34,6 +34,10 @@ public class Shooter extends SubsystemBase {
     private final TalonFX m_backLeftFollowerShooterMotor = new TalonFX(ShooterConstants.kBackLeftFollowerShooterMotorId);
     private final TalonFX m_rightFollowerShooterMotor = new TalonFX(ShooterConstants.kRightFollowerShooterMotorId);
     private final TalonFX m_backRightFollowerShooterMotor = new TalonFX(ShooterConstants.kBackRightFollowerShooterMotorId);
+    private final TalonFX[] m_shotWheels = {m_leftLeaderShooterMotor, m_backLeftFollowerShooterMotor,
+        m_rightFollowerShooterMotor, m_backRightFollowerShooterMotor};
+    private static final String[] kWheelNotReady = {"Left leader wheel not at speed", "Rear left wheel not at speed",
+        "Right wheel not at speed", "Rear right wheel not at speed"};
 
     private final VelocityVoltage m_velocityRequest = new VelocityVoltage(0);
     private final MotionMagicVoltage m_positionRequest = new MotionMagicVoltage(0);
@@ -74,9 +78,10 @@ public class Shooter extends SubsystemBase {
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
     private double m_targetPassRps = 30;  // distance-interpolated ferry speed
     private ManualShotPreset m_manualShot;
-    private final VisionHubRange m_visionRange = new VisionHubRange();
+    private final VisionAimTracker m_visionAim;
     private boolean m_visionShot;
     private double m_visionPivotTrim, m_visionRpsTrim;
+    private double m_feedPausedAt = Double.NaN;
 
     // ===== Protection =====
     // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
@@ -204,6 +209,7 @@ public class Shooter extends SubsystemBase {
 
     public Shooter(CommandSwerveDrivetrain drive) {
         m_drive = drive;
+        m_visionAim = drive.getVisionAim();
         // Time-of-flight offset is read by the drivetrain, so it's seeded here directly;
         // the other tuning knobs self-register via their LoggedTunableNumber fields.
         SmartDashboard.putNumber(ShooterConstants.kTimeOfFlightOffsetKey, 0);
@@ -238,9 +244,9 @@ public class Shooter extends SubsystemBase {
         m_followerPivotMotor.getSupplyCurrent().setUpdateFrequency(50);
         m_indexerMotor.getSupplyCurrent().setUpdateFrequency(50);
 
-        // Follower velocities + follower pivot position + indexer velocity: enabled so the
-        // active self-test can confirm each of those motors actually turns. optimizeBusUtilization
-        // below would otherwise freeze them (they aren't read anywhere in normal operation).
+        // Follower velocities + follower pivot position are also required by the
+        // vision-shot readiness gate. Keep these and indexer velocity alive for the
+        // active self-test; optimizeBusUtilization() would otherwise freeze them.
         m_backLeftFollowerShooterMotor.getVelocity().setUpdateFrequency(50);
         m_rightFollowerShooterMotor.getVelocity().setUpdateFrequency(50);
         m_backRightFollowerShooterMotor.getVelocity().setUpdateFrequency(50);
@@ -277,13 +283,14 @@ public class Shooter extends SubsystemBase {
         m_shooterState = shooterState;
     }
 
-    /** Vision controls range only; the driver still controls yaw. No automatic tower fallback. */
+    /** Shared validated vision controls range and chassis aim; no automatic tower fallback. */
     public void startVisionShot() {
         setState(IndexerState.ZERO, PivotState.SCORE, ShooterState.SCORE);
         m_visionShot = true;
         m_visionPivotTrim = m_pivotOffset.get();
         m_visionRpsTrim = m_shooterRpsOffset.get();
-        m_targetShooterRps = 0;
+        // Visible pre-spin while acquiring, never a blind scoring preset or permission to feed.
+        m_targetShooterRps = ShooterConstants.kIdleShooterRps;
         m_targetPivotPosition = ShooterConstants.kStowPivotPosition;
     }
 
@@ -347,13 +354,20 @@ public class Shooter extends SubsystemBase {
     }
 
     private void runFeedWithRecovery() {
+        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
         // A timeout must NEVER force-feed a vision shot with missing/stale range.
         // Recheck mechanical readiness as the live distance/targets change.
         if (m_visionShot && !readyToShoot()) {
-            stopFeedWithRecovery();
+            if (!Double.isFinite(m_feedPausedAt)) m_feedPausedAt = now;
+            setState(IndexerState.ZERO);
             return;
         }
-        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        // A transient aim/RPS pause must not erase the jam retry budget or make
+        // the no-shot timer count time in which we deliberately were not feeding.
+        if (Double.isFinite(m_feedPausedAt)) {
+            m_feedRecoveryPhaseStart += now - m_feedPausedAt;
+            m_feedPausedAt = Double.NaN;
+        }
         if (m_feedRecoveryPhase == FeedRecoveryPhase.IDLE) {
             m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
             m_feedRecoveryPhaseStart = now;
@@ -395,14 +409,17 @@ public class Shooter extends SubsystemBase {
             case FAULT -> setState(IndexerState.ZERO);
             case IDLE -> { /* initialized above */ }
         }
-        SmartDashboard.putString("shooter/feed recovery phase", m_feedRecoveryPhase.toString());
-        SmartDashboard.putNumber("shooter/feed recovery attempts", m_feedRecoveryAttempts);
+        if (diagLoop()) {
+            SmartDashboard.putString("shooter/feed recovery phase", m_feedRecoveryPhase.toString());
+            SmartDashboard.putNumber("shooter/feed recovery attempts", m_feedRecoveryAttempts);
+        }
     }
 
     private void stopFeedWithRecovery() {
         setState(IndexerState.ZERO);
         m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
         m_feedRecoveryAttempts = 0;
+        m_feedPausedAt = Double.NaN;
     }
 
     // === Active self-test (pit motor test) ===
@@ -524,10 +541,11 @@ public class Shooter extends SubsystemBase {
 
     public boolean readyToShoot() {
         boolean manual = isManualShotActive();
-        boolean shotInRange = manual || (m_visionShot ? m_visionRange.isValid()
+        boolean shotInRange = manual || (m_visionShot ? m_visionAim.inRange()
             : m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters);
-        boolean aimed = manual || m_visionShot || !m_drive.isAutoAlignmentEnabled()
-            || Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees;
+        boolean aimed = manual || (m_visionShot ? m_drive.isVisionAimReady()
+            : !m_drive.isAutoAlignmentEnabled()
+                || Math.abs(m_drive.getHubHeadingError().getDegrees()) <= ShooterConstants.kHeadingReadyToleranceDegrees);
         boolean shooterReady = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetShooterRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
         // Convert motor position to output (pivot) rotations using gear ratio
@@ -542,10 +560,37 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putBoolean("ready/aimed", aimed);
             SmartDashboard.putBoolean("ready/shooter at speed", shooterReady);
             SmartDashboard.putBoolean("ready/pivot in position", pivotReady);
+            SmartDashboard.putBoolean("ready/all vision mechanisms", !m_visionShot
+                || visionMechanismBlockReason().equals("Ready"));
         }
 
-        return (manual || (m_visionShot ? m_visionRange.isValid() : m_drive.isFieldAimingReady()))
-            && shotInRange && aimed && shooterReady && pivotReady;
+        return (manual || (m_visionShot ? m_visionAim.inRange() : m_drive.isFieldAimingReady()))
+            && shotInRange && aimed && shooterReady && pivotReady
+            && (!m_visionShot || visionMechanismBlockReason().equals("Ready"));
+    }
+
+    /** Vision shots do not bypass a dead follower, stale encoder, or an unsettled pivot. */
+    private String visionMechanismBlockReason() {
+        for (int i = 0; i < m_shotWheels.length; i++) {
+            var velocity = m_shotWheels[i].getVelocity();
+            double actual = velocity.getValueAsDouble();
+            if (!velocity.getStatus().isOK() || !Double.isFinite(actual) || velocity.getTimestamp().getLatency() > .15)
+                return "Flywheel feedback invalid/stale";
+            if (Math.abs(actual - m_targetShooterRps) > ShooterConstants.kShooterReadyToleranceRps)
+                return kWheelNotReady[i];
+        }
+        var leader = m_leaderPivotMotor.getPosition();
+        var follower = m_followerPivotMotor.getPosition();
+        if (!leader.getStatus().isOK() || !follower.getStatus().isOK()
+            || leader.getTimestamp().getLatency() > .15 || follower.getTimestamp().getLatency() > .15)
+            return "Pivot feedback invalid/stale";
+        double leaderError = leader.getValueAsDouble() / ShooterConstants.kPivotGearRatio - m_targetPivotPosition;
+        double followerError = follower.getValueAsDouble() / ShooterConstants.kPivotGearRatio - m_targetPivotPosition;
+        if (!Double.isFinite(leaderError) || !Double.isFinite(followerError)
+            || Math.abs(leaderError) > ShooterConstants.kVisionPivotReadyToleranceRotations
+            || Math.abs(followerError) > ShooterConstants.kVisionPivotReadyToleranceRotations)
+            return "Pivot not at target (both sides)";
+        return "Ready";
     }
 
     // Pass readiness: unlike readyToShoot(), this gates on the PASS targets -- flywheel
@@ -598,14 +643,13 @@ public class Shooter extends SubsystemBase {
     @Override
     public void periodic() {
         m_diagLoopCount++;
-        m_visionRange.update(edu.wpi.first.wpilibj.Timer.getFPGATimestamp());
 
         // === Update shot targets from drivetrain compensation ===
         // The drivetrain computes motion-compensated distance and heading each loop;
         // we interpolate the shot table to get the pivot and RPS for that distance, then
         // add the live offsets so the driver can trim without redeploying.
         double shotDistance = isManualShotActive() ? m_manualShot.distanceMeters()
-            : m_visionShot ? (m_visionRange.isValid() ? m_visionRange.distanceMeters() : 0)
+            : m_visionShot ? (m_visionAim.inRange() ? m_visionAim.distanceMeters() : 0)
             : m_drive.getShotDistance();
         var trajectorySolution = !isManualShotActive() && !m_visionShot && FeatureFlags.TRAJECTORY_MAP.getAsBoolean()
             ? TrajectoryMap.lookup(shotDistance, m_drive.getShotRadialVelocityMetersPerSecond())
@@ -620,30 +664,29 @@ public class Shooter extends SubsystemBase {
             m_targetPivotPosition = m_drive.getTiltCompensatedPivotPosition(nominalPivot)
                 + m_pivotOffset.get();
             m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
-        } else if (m_visionRange.isValid()) {
+        } else if (m_visionAim.inRange()) {
             var preset = ManualShotPreset.create(shotDistance, m_visionPivotTrim, m_visionRpsTrim);
             m_targetPivotPosition = preset.pivotRotations();
             m_targetShooterRps = preset.wheelRps();
         }
         if (diagLoop()) {
-            SmartDashboard.putBoolean("Shooter/VisionRange/Valid", m_visionRange.isValid());
-            SmartDashboard.putString("Shooter/VisionRange/Status", m_visionRange.status());
-            SmartDashboard.putNumber("Shooter/VisionRange/TagId", m_visionRange.observedTagId());
-            SmartDashboard.putNumber("Shooter/VisionRange/FrameAgeS", m_visionRange.frameAgeSeconds());
-            SmartDashboard.putNumber("Shooter/VisionRange/DistanceM", m_visionRange.isValid()
-                ? m_visionRange.distanceMeters() : 0);
-            if (m_visionShot) SmartDashboard.putString("Shooter/ControlMode", m_visionRange.isValid()
-                ? "VISION RANGE - manual aim" : "VISION LOST - A + trigger for tower preset");
+            SmartDashboard.putBoolean("Shooter/VisionRange/Valid", m_visionAim.inRange());
+            SmartDashboard.putString("Shooter/VisionRange/Status", m_drive.getVisionAimStatus());
+            SmartDashboard.putNumber("Shooter/VisionRange/FrameAgeS", m_visionAim.ageSeconds());
+            SmartDashboard.putNumber("Shooter/VisionRange/DistanceM", m_visionAim.inRange()
+                ? m_visionAim.distanceMeters() : 0);
+            if (m_visionShot) SmartDashboard.putString("Shooter/ControlMode", m_visionAim.inRange()
+                ? "VISION AUTO-AIM" : "ACQUIRING VISION - A + trigger for manual tower");
             if (m_visionShot) {
                 double wheelError = m_targetShooterRps - m_leftLeaderShooterMotor.getVelocity().getValueAsDouble();
                 double pivotError = m_targetPivotPosition
                     - m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
-                SmartDashboard.putString("Shooter/ShotBlockReason", !m_visionRange.isValid() ? m_visionRange.status()
-                    : Math.abs(wheelError) > ShooterConstants.kShooterReadyToleranceRps ? "Flywheel not at speed"
-                    : Math.abs(pivotError) > ShooterConstants.kPivotReadyToleranceRotations ? "Pivot not at target"
-                    : "Ready");
+                String mechanism = visionMechanismBlockReason();
+                SmartDashboard.putString("Shooter/ShotBlockReason", !m_visionAim.inRange() ? m_drive.getVisionAimStatus()
+                    : !mechanism.equals("Ready") ? mechanism : m_drive.getVisionFeedBlockReason());
                 SmartDashboard.putNumber("Shooter/ShotWheelErrorRps", wheelError);
                 SmartDashboard.putNumber("Shooter/ShotPivotErrorRot", pivotError);
+                SmartDashboard.putBoolean("Shooter/FeedPaused", Double.isFinite(m_feedPausedAt));
             }
         }
         if (isManualShotActive()) {
@@ -858,6 +901,10 @@ public class Shooter extends SubsystemBase {
         if (RobotLogger.shouldLogPeriodic()) {
             RobotLogger.log("Shooter/ShotDistanceM", shotDistance);
             RobotLogger.log("Shooter/ManualPreset", isManualShotActive());
+            RobotLogger.log("Shooter/VisionAutoAim", m_visionShot);
+            RobotLogger.log("Shooter/VisionTargetAgeS", m_visionAim.ageSeconds());
+            RobotLogger.log("Shooter/VisionAimErrorDeg", m_drive.getVisionAimErrorDegrees());
+            RobotLogger.log("Shooter/VisionStatus", m_drive.getVisionAimStatus());
             RobotLogger.log("Shooter/HubHeadingErrorDeg", m_drive.getHubHeadingError().getDegrees());
             RobotLogger.log("Shooter/TargetPivotRot", m_targetPivotPosition);
             RobotLogger.log("Shooter/ActualPivotRot", pivotOutputRot);

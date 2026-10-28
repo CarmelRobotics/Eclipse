@@ -301,12 +301,12 @@ public class RobotContainer {
     m_controller.a().and(teleop).and(m_controller.rightTrigger().negate()).whileTrue(
         Commands.parallel(
             m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
-            rumbleWhenReady(m_shooter::readyToShoot)
+            rumbleWhenReady(m_drivetrain::isVisionAimReady)
         )
     );
-    // Right trigger: hub-tag vision range only. Hold A BEFORE pulling the trigger
+    // Right trigger: shared vision range + bounded chassis alignment. Hold A BEFORE pulling the trigger
     // for the explicit fixed tower fallback. Choice latches until release.
-    // Neither mode controls yaw or uses global field pose / automatic passing.
+    // Tower mode is fully manual yaw; neither mode automatically changes into a pass.
     m_controller.rightTrigger().and(teleop).whileTrue(
         Commands.either(heldTeleopShotCommand(true), heldTeleopShotCommand(false), m_controller.a())
             .finallyDo(() -> SmartDashboard.putString("Shooter/ControlMode", "IDLE"))
@@ -617,9 +617,10 @@ public class RobotContainer {
     );
     return Commands.parallel(
         Commands.deadline(shoot, lintakePumpCommand()),
-        m_drivetrain.applyRequest(() -> driveRequest
+        towerPreset ? m_drivetrain.applyRequest(() -> driveRequest
             .withVelocityX(shootingXVelocity()).withVelocityY(shootingYVelocity())
-            .withRotationalRate(driverRotationalRate())),
+            .withRotationalRate(driverRotationalRate()))
+            : m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
         rumbleWhenReady(m_shooter::readyToShoot)
     ).finallyDo(() -> {
       stopShooter();

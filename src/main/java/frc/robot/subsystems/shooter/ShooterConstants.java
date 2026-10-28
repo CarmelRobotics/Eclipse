@@ -25,8 +25,15 @@ public final class ShooterConstants {
 
     // ===== Game-specific targets =====
     // Hub positions in blue-origin field coordinates (field corners: blue (0,0), red (16.54, 8.21)).
-    public static final Translation2d kBlueHubPosition = new Translation2d(4.625, 4.035);
-    public static final Translation2d kRedHubPosition = new Translation2d(11.925, 4.035);
+    // Official 2026 welded layout: hub-center X from centered side tags, Y from centered face tags.
+    public static final Translation2d kBlueHubPosition = new Translation2d(4.6256194, 4.0346376);
+    public static final Translation2d kRedHubPosition = new Translation2d(11.9154194, 4.0346376);
+    public static final double kVisionShotMaxLinearSpeed = .75;
+    public static final double kVisionShotMaxAngularSpeed = .5;
+    public static final double kVisionShotMaxTiltDegrees = 5.0;
+    public static final double kVisionPivotReadyToleranceRotations = .006; // 2.16 output degrees.
+    public static final double kVisionAimMaxOmega = 2.0;
+    public static final double kVisionAimKp = 5.0;
 
     // Field bounds from the official 2026-rebuilt-welded AprilTag layout.
     public static final double kFieldLengthMeters = 16.541;

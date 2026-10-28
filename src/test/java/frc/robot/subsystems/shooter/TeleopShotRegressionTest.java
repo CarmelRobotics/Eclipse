@@ -39,7 +39,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class TeleopShotRegressionTest {
   @ParameterizedTest
   @EnumSource(value = AllianceStationID.class, names = {"Blue1", "Red1"})
-  void visionRangeAndExplicitTowerFallbackPreserveManualYaw(AllianceStationID station)
+  void atomicVisionShootsWithoutGlobalHeadingAndExplicitTowerRetainsManualYaw(AllianceStationID station)
       throws Exception {
     assertTrue(HAL.initialize(500, 0));
     SimHooks.resumeTiming();
@@ -94,15 +94,26 @@ class TeleopShotRegressionTest {
       assertFalse(shooter.isManualShotActive());
       assertFalse(shooter.readyToShoot());
       assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
-      assertEquals(0, assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
+      assertEquals(ShooterConstants.kIdleShooterRps,
+          assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
       // Blue hub tag is accepted even with FMS Red: only range is used; no field-pose target selection.
-      tickVision(scheduler, camera, 3.0, 4);
+      tickVision(scheduler, camera, 3.0, 10);
+      assertFalse(drive.isFieldAimingReady(), "Vision-relative aim must not require a separate global heading seed");
       verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
       var visionPreset = ManualShotPreset.create(3, 0, 0);
       for (int i = 0; i < 12; i++) {
         // Raw rotor simulation is pre-inversion; both leader motors are Clockwise_Positive.
-        flywheel.getSimState().setRotorVelocity(-visionPreset.wheelRps());
+        String[] wheelFields = {"m_leftLeaderShooterMotor", "m_backLeftFollowerShooterMotor",
+            "m_rightFollowerShooterMotor", "m_backRightFollowerShooterMotor"};
+        for (int wheel = 0; wheel < wheelFields.length; wheel++) {
+          var motor = (TalonFX) field(shooter, wheelFields[wheel]);
+          motor.getSimState().setRotorVelocity((wheel < 2 ? -1 : 1) * visionPreset.wheelRps());
+          motor.getVelocity().refresh();
+        }
         pivot.getSimState().setRawRotorPosition(-visionPreset.pivotRotations() * ShooterConstants.kPivotGearRatio);
+        var followerPivot = (TalonFX) field(shooter, "m_followerPivotMotor");
+        followerPivot.getSimState().setRawRotorPosition(visionPreset.pivotRotations() * ShooterConstants.kPivotGearRatio);
+        followerPivot.getPosition().refresh();
         flywheel.getVelocity().refresh();
         pivot.getPosition().refresh();
         tickVision(scheduler, camera, 3.0, 1);
@@ -113,14 +124,30 @@ class TeleopShotRegressionTest {
           + ", range=" + SmartDashboard.getBoolean("Shooter/VisionRange/Valid", false));
       tickVision(scheduler, camera, 3.0, 1);
       assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"));
+      var retryBudget = Shooter.class.getDeclaredField("m_feedRecoveryAttempts");
+      retryBudget.setAccessible(true);
+      retryBudget.setInt(shooter, 1);
+      var rearRight = (TalonFX) field(shooter, "m_backRightFollowerShooterMotor");
+      rearRight.getSimState().setRotorVelocity(0);
+      rearRight.getVelocity().refresh();
+      tickVision(scheduler, camera, 3.0, 4);
+      assertFalse(shooter.readyToShoot(), "A failed follower wheel must stop vision feeding");
+      assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"));
+      assertEquals(1, retryBudget.getInt(shooter), "Readiness pauses must preserve jam retries");
+      rearRight.getSimState().setRotorVelocity(visionPreset.wheelRps());
+      rearRight.getVelocity().refresh();
+      tickVision(scheduler, camera, 3.0, 4);
+      assertTrue(shooter.readyToShoot());
+      assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"));
+      assertEquals(1, retryBudget.getInt(shooter));
       drive.resetPose(new Pose2d(14, 2, Rotation2d.fromDegrees(37)));
       controller.setRightX(.25);
       tickVision(scheduler, camera, 3.0, 3);
       verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
-      verifyManualYaw(drive, snap, towerDrive);
-      publishVision(camera, 3.4);
+      verifyManualYaw(drive, snap, (SwerveRequest.FieldCentric) field(drive, "m_unlocalizedDrive"));
+      publishVision(camera, 3.1);
       tick(scheduler, 2);
-      verifyRangeTargets(flywheel, pivot, 3.1, 0, 0); // 0.25 low-pass step, not a raw jump.
+      verifyRangeTargets(flywheel, pivot, 3.045, 0, 0); // Filter one distinct camera frame, not each robot loop.
       tick(scheduler, 18); // No fresh frame: stale data must stop feed, never select tower.
       assertFalse(shooter.readyToShoot());
       assertFalse(shooter.isManualShotActive());
@@ -142,7 +169,7 @@ class TeleopShotRegressionTest {
       verifyTowerTargets(flywheel, pivot, 0, 0);
       assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"), "Do not feed before spin-up");
       assertEquals("TOWER PRESET - aim with right stick", SmartDashboard.getString("Shooter/ControlMode", ""));
-      assertEquals("VISION RANGE / A+TRIGGER TOWER", SmartDashboard.getString("aim/auto mode", ""));
+      assertEquals("VISION AUTO-AIM / A+TRIGGER MANUAL TOWER", SmartDashboard.getString("aim/auto mode", ""));
       // Acquiring position/heading and editing the dashboard while held must NOT
       // switch to auto-aim or change the tower shot's already-latched preset/trims.
       drive.resetPose(new Pose2d(14, 2, Rotation2d.k180deg));
@@ -278,15 +305,14 @@ class TeleopShotRegressionTest {
   }
 
   private static void publishVision(edu.wpi.first.networktables.NetworkTable camera, double distance) {
-    // Distinct frames despite constant range: NT suppresses identical array updates.
+    // Small image-area noise; geometry is constant. Native pipeline tests separately
+    // cover bit-identical packets with real keepDuplicates publishers.
     double marker = Timer.getFPGATimestamp() * 1e-8;
-    camera.getEntry("tv").setDouble(1);
-    camera.getEntry("tid").setDouble(26);
-    camera.getEntry("tl").setDouble(0);
-    camera.getEntry("cl").setDouble(0);
-    camera.getEntry("rawfiducials").setDoubleArray(new double[] {26, marker, 0, 2, distance, distance, .05});
-    // Tag 26 is centered on the blue alliance-facing face, 0.603758 m in front of hub center.
-    camera.getEntry("botpose_targetspace").setDoubleArray(new double[] {0, 1.12395, distance - .603758, 0, 0, marker});
+    double trim = SmartDashboard.getNumber("ShotTuning/HeadingOffsetDeg", 6.7);
+    camera.getEntry("botpose_wpiblue").setDoubleArray(new double[] {
+        ShooterConstants.kBlueHubPosition.getX() - distance, ShooterConstants.kBlueHubPosition.getY(),
+        0, 0, 0, trim, 15, 1, 0, 2, .5 + marker,
+        31, 0, 0, .5 + marker, 2, 2, .05}); // A tower tag, not a hub tag.
   }
 
   private static void tickVision(CommandScheduler scheduler,
@@ -305,12 +331,12 @@ class TeleopShotRegressionTest {
 
   private static void verifyManualYaw(CommandSwerveDrivetrain drive,
       SwerveRequest.FieldCentricFacingAngle snap, SwerveRequest.FieldCentric request) {
-    assertFalse(Constants.kTeleopAutoAlignEnabled);
-    assertFalse(drive.isAutoAlignmentEnabled());
+    assertTrue(Constants.kTeleopAutoAlignEnabled);
+    assertTrue(drive.isAutoAlignmentEnabled());
     assertEquals(-.25 * Constants.kMaxAngularRate, request.RotationalRate, 1e-9,
         "A, right trigger, and POV-up must retain the driver's requested yaw");
     assertEquals(20, snap.TargetDirection.getDegrees(), 1e-9,
-        "Teleop must not update a heading-lock target, even when fully localized");
+        "Driver override must not update a field-heading-lock target");
   }
 
   private static void refresh() {

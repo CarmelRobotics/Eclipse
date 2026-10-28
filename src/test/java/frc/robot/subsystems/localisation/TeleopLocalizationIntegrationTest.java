@@ -20,6 +20,7 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.subsystems.drive.CommandSwerveDrivetrain;
 import frc.robot.subsystems.drive.TunerConstants;
+import frc.robot.subsystems.shooter.ShooterConstants;
 import org.junit.jupiter.api.Test;
 
 /** Production subsystem + real Phoenix simulator + local synthetic NT camera, no GUI/network. */
@@ -46,7 +47,7 @@ class TeleopLocalizationIntegrationTest {
       ((Notifier) sim.get(drive)).close();
       Timer.delay(.15);
       drive.prepareForMatch();
-      assertEquals(11.925, drive.getHubPosition().getX(), 1e-9);
+      assertEquals(ShooterConstants.kRedHubPosition.getX(), drive.getHubPosition().getX(), 1e-9);
       for (int i = 0; i < 7; i++) publish(drive, 2.541 + i * .0001, 6.069, 2);
       assertFalse(drive.isFieldAimingReady());
       assertTrue(drive.getState().Pose.getX() < 1, "Mirrored camera must not initialize pose");
@@ -73,7 +74,7 @@ class TeleopLocalizationIntegrationTest {
       DriverStationSim.notifyNewData();
       DriverStation.refreshData();
       drive.periodic();
-      assertEquals(11.925, drive.getHubPosition().getX(), 1e-9,
+      assertEquals(ShooterConstants.kRedHubPosition.getX(), drive.getHubPosition().getX(), 1e-9,
           "FMS/alliance packet loss must not change red target to blue");
       // Publish the decimated diagnostic deterministically, not by test loop count.
       for (int i = 0; i < 5; i++) drive.periodic();
@@ -85,7 +86,7 @@ class TeleopLocalizationIntegrationTest {
       drive.periodic();
       drive.resetPose(new Pose2d(2, 2, Rotation2d.kZero));
       drive.periodic();
-      assertEquals(4.625, drive.getHubPosition().getX(), 1e-9);
+      assertEquals(ShooterConstants.kBlueHubPosition.getX(), drive.getHubPosition().getX(), 1e-9);
       assertTrue(drive.isFieldAimingReady(), "Explicit auto-style reset initializes both axes");
       verifyAimRequest(drive);
       CommandScheduler.getInstance().unregisterSubsystem(drive);
@@ -117,7 +118,8 @@ class TeleopLocalizationIntegrationTest {
     assertTrue(drive.isAutoAlignmentEnabled(), "Autonomous heading control must remain enabled");
     var command = drive.faceHubCommand(() -> 0.0, () -> 0.0);
     command.initialize();
-    command.execute();
+    // Run the command's beforeStarting sequence as the scheduler would, then the request.
+    for (int i = 0; i < 3; i++) command.execute();
     var requestField = CommandSwerveDrivetrain.class.getDeclaredField("snapRequest");
     requestField.setAccessible(true);
     var request = (SwerveRequest.FieldCentricFacingAngle) requestField.get(drive);
