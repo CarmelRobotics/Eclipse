@@ -177,7 +177,7 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_jamReverseDuration =
         new LoggedTunableNumber("ShotTuning/JamReverseDuration", 0.18);
     private final LoggedTunableNumber m_maxRecoveryAttempts =
-        new LoggedTunableNumber("ShotTuning/MaxRecoveryAttempts", 2.0);
+        new LoggedTunableNumber("ShotTuning/MaxRecoveryAttempts", 50.0);
     private int m_shotCount = 0;
     private boolean m_shotArmed = false;   // wheel has reached target velocity at least once; ready to detect dips
     private boolean m_inDip = false;       // currently experiencing a dip (ball in flight or stuck)
