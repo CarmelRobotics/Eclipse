@@ -101,6 +101,7 @@ class TeleopShotRegressionTest {
       assertFalse(drive.isFieldAimingReady(), "Vision-relative aim must not require a separate global heading seed");
       verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
       var visionPreset = ManualShotPreset.vision(3, 0, 0);
+      var followerPivot = (TalonFX) field(shooter, "m_followerPivotMotor");
       for (int i = 0; i < 12; i++) {
         // Raw rotor simulation is pre-inversion; both leader motors are Clockwise_Positive.
         String[] wheelFields = {"m_leftLeaderShooterMotor", "m_backLeftFollowerShooterMotor",
@@ -111,7 +112,6 @@ class TeleopShotRegressionTest {
           motor.getVelocity().refresh();
         }
         pivot.getSimState().setRawRotorPosition(-visionPreset.pivotRotations() * ShooterConstants.kPivotGearRatio);
-        var followerPivot = (TalonFX) field(shooter, "m_followerPivotMotor");
         followerPivot.getSimState().setRawRotorPosition(visionPreset.pivotRotations() * ShooterConstants.kPivotGearRatio);
         followerPivot.getPosition().refresh();
         flywheel.getVelocity().refresh();
@@ -121,8 +121,15 @@ class TeleopShotRegressionTest {
       }
       assertTrue(shooter.readyToShoot(), () -> "Fresh vision must permit ready: velocity="
           + flywheel.getVelocity().getValueAsDouble() + ", pivot=" + pivot.getPosition().getValueAsDouble()
-          + ", range=" + SmartDashboard.getBoolean("Shooter/VisionRange/Valid", false));
+          + ", range=" + SmartDashboard.getBoolean("Shooter/VisionRange/Valid", false)
+          + ", block=" + SmartDashboard.getString("Shooter/ShotBlockReason", "unknown")
+          + ", electrical=" + SmartDashboard.getBoolean("indexer overcurrent tripped", false)
+          + ", followerPivot=" + followerPivot.getPosition().getValueAsDouble()
+          + ", targetPivot=" + SmartDashboard.getNumber("interpolated pivot position", -1));
       tickVision(scheduler, camera, 3.0, 1);
+      assertEquals(IndexerState.ZERO, field(shooter, "m_indexerState"),
+          "Do not feed on the first instant the wheels reach target speed");
+      tickVision(scheduler, camera, 3.0, 15);
       assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"));
       var retryBudget = Shooter.class.getDeclaredField("m_feedRecoveryAttempts");
       retryBudget.setAccessible(true);
@@ -140,6 +147,22 @@ class TeleopShotRegressionTest {
       assertTrue(shooter.readyToShoot());
       assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"));
       assertEquals(1, retryBudget.getInt(shooter));
+      // With the driver actually holding the shooting binding, even a wildly
+      // wrong fused XY/heading must not change range, wheel/hood requests or feed.
+      for (Pose2d corrupt : new Pose2d[] {
+          new Pose2d(4, 7, Rotation2d.fromDegrees(80)),
+          new Pose2d(8.2, .2, Rotation2d.fromDegrees(-100)),
+          new Pose2d(14.9, 4, Rotation2d.k180deg),
+          new Pose2d(0, 0, Rotation2d.fromDegrees(179))}) {
+        drive.resetPose(corrupt);
+        tickVision(scheduler, camera, 3.0, 2);
+        verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
+        assertEquals(0, drive.getVisionAimErrorDegrees(), .01);
+        assertEquals(0, ((SwerveRequest.FieldCentric) field(drive, "m_unlocalizedDrive")).RotationalRate, .001);
+        assertTrue(shooter.readyToShoot(), "Global estimator fault must not block a valid relative shot");
+        assertEquals(IndexerState.SCORE, field(shooter, "m_indexerState"));
+      }
+      System.out.println("DRIFT_SHOOTER " + station + ": 4 corrupt global poses retained wheel/hood targets and live feed");
       drive.resetPose(new Pose2d(14, 2, Rotation2d.fromDegrees(37)));
       controller.setRightX(.25);
       tickVision(scheduler, camera, 3.0, 3);

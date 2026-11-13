@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import com.ctre.phoenix6.SignalLogger;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.ctre.phoenix6.swerve.SwerveRequest;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.hal.AllianceStationID;
 import edu.wpi.first.hal.HAL;
 import edu.wpi.first.math.MathUtil;
@@ -64,11 +66,40 @@ class TeleopLocalizationIntegrationTest {
       DriverStationSim.setAutonomous(false);
       DriverStationSim.notifyNewData();
       DriverStation.refreshData();
+      // A first validated multi-tag frame should immediately pull a pose that
+      // wandered toward the stands back to the field.
+      drive.resetPose(new Pose2d(15.5, 7.9, Rotation2d.k180deg));
+      publish(drive, 14, 2, 2, 180);
+      Timer.delay(.06);
+      drive.periodic();
+      assertTrue(drive.getState().Pose.getY() < 3,
+          "First valid multi-tag frame should correct drift immediately: y="
+              + drive.getState().Pose.getY() + ", status="
+              + SmartDashboard.getString("Localization/Vision status", "unknown"));
+      for (int i = 1; i < 7; i++) publish(drive, 14 + i * .0001, 2, 2, 180);
+      assertTrue(drive.getState().Pose.getY() < 3,
+          "Confirmed vision must recover large enabled odometry drift");
+      double correctedX = drive.getState().Pose.getX();
       for (int i = 0; i < 7; i++) publish(drive, 2.541 + i * .0001, 6.069, 2);
-      assertEquals(14, drive.getState().Pose.getX(), .05, "No enabled cross-field teleport");
+      assertEquals(correctedX, drive.getState().Pose.getX(), .05, "No enabled cross-field teleport");
       publish(drive, 0, 0, 0);
       assertTrue(drive.isFieldAimingReady(), "Tag loss keeps referenced odometry available");
-      assertEquals(14, drive.getState().Pose.getX(), .05);
+      assertEquals(correctedX, drive.getState().Pose.getX(), .05);
+      drive.resetPose(new Pose2d(15.5, 7.9, Rotation2d.k180deg));
+      publishSingleRedTag(drive, 14);
+      Timer.delay(.06);
+      drive.periodic();
+      assertTrue(drive.getState().Pose.getY() < 3,
+          "First valid single-tag frame should correct drift immediately: y="
+              + drive.getState().Pose.getY() + ", status="
+              + SmartDashboard.getString("Localization/Vision status", "unknown") + ", input="
+              + SmartDashboard.getString("Vision/InputStatus", "unknown"));
+      for (int i = 1; i < 7; i++) publishSingleRedTag(drive, 14 + i * .0001);
+      assertTrue(drive.getState().Pose.getY() < 3,
+          "A verified single tag must also recover large enabled XY drift: y="
+              + drive.getState().Pose.getY() + ", vision="
+              + SmartDashboard.getString("Localization/Vision status", "unknown") + ", input="
+              + SmartDashboard.getString("Vision/InputStatus", "unknown"));
       DriverStationSim.setFmsAttached(false);
       DriverStationSim.setAllianceStationId(AllianceStationID.Unknown);
       DriverStationSim.notifyNewData();
@@ -101,8 +132,36 @@ class TeleopLocalizationIntegrationTest {
   }
 
   private static void publish(CommandSwerveDrivetrain drive, double x, double y, int tags) {
+    publish(drive, x, y, tags, 0);
+  }
+
+  private static void publish(CommandSwerveDrivetrain drive, double x, double y, int tags,
+      double headingDegrees) {
     NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name()).getEntry("botpose_wpiblue")
-        .setDoubleArray(new double[] {x, y, 0, 0, 0, 0, 20, tags, 1, 2, .5});
+        .setDoubleArray(new double[] {x, y, 0, 0, 0, headingDegrees, 20, tags, 1, 2, .5});
+    Timer.delay(.045);
+    drive.periodic();
+  }
+
+  private static void publishSingleRedTag(CommandSwerveDrivetrain drive, double x) {
+    var layout = AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltWelded);
+    int nearestId = 0;
+    double nearestRange = Double.POSITIVE_INFINITY;
+    for (int id = 1; id <= 32; id++) {
+      var tag = layout.getTagPose(id);
+      if (tag.isEmpty()) continue;
+      double range = Math.sqrt(Math.pow(tag.get().getX() - x, 2)
+          + Math.pow(tag.get().getY() - 2, 2) + Math.pow(tag.get().getZ(), 2));
+      if (range < nearestRange) {
+        nearestRange = range;
+        nearestId = id;
+      }
+    }
+    assertTrue(nearestRange < 3.0);
+    NetworkTableInstance.getDefault().getTable(LocalisationConstants.kLimelights[0].name())
+        .getEntry("botpose_wpiblue").setDoubleArray(new double[] {
+            x, 2, 0, 0, 0, 180, 20, 1, 0, nearestRange, .5,
+            nearestId, 0, 0, .5, nearestRange, nearestRange, .08});
     Timer.delay(.045);
     drive.periodic();
   }

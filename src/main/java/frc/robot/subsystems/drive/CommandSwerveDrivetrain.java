@@ -79,6 +79,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     // Counts how many times vision has reset the pose. If this isn't climbing while a
     // tag is in view, vision positioning is broken -- check the Limelight name and NT.
     private int m_visionPoseResets = 0;
+    private double m_lastPassVisionTime = Double.NEGATIVE_INFINITY;
 
     // Live aim trim (degrees). Corrects a constant left/right bias in where shots land,
     // e.g. the shooter not sitting perfectly square on the frame. Tune on the field in
@@ -419,6 +420,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     public boolean hasAlliance() { return m_localization.alliance().isPresent(); }
     public boolean isFieldAimingReady() { return m_localization.readyToAim(); }
 
+    /** A pass target needs a recently checked field position, not a latched seed. */
+    public boolean isPassPoseTrustworthy() {
+        Pose2d pose = getState().Pose;
+        return m_localization.readyToAim()
+            && FeatureFlags.VISION_FUSION.getAsBoolean()
+            && Timer.getFPGATimestamp() - m_lastPassVisionTime <= 2.0
+            && Double.isFinite(pose.getX()) && Double.isFinite(pose.getY())
+            && pose.getX() >= 0 && pose.getX() <= ShooterConstants.kFieldLengthMeters
+            && pose.getY() >= 0 && pose.getY() <= ShooterConstants.kFieldWidthMeters;
+    }
+
     public boolean isAutoAlignmentEnabled() {
         return DriverStation.isAutonomousEnabled() || Constants.kTeleopAutoAlignEnabled;
     }
@@ -466,9 +478,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         updateAllianceDependentState();
 
         // One BLUE-origin frame for vision, odometry, aiming, PathPlanner, and Elastic.
-        // Validate freshness/quality before fusion. Position acquisition requires
-        // consistent stationary frames; a trusted enabled pose can NEVER be teleported
-        // across the field by one distant/mirrored vision measurement.
+        // Validate each camera frame before giving vision primary influence on XY.
         boolean hubVisible = false;
         double visionNow = Timer.getFPGATimestamp();
         m_vision.update(visionNow);
@@ -495,9 +505,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                     ));
                     m_visionPoseResets++;
                 } else if (update == FieldLocalization.Update.FUSE) {
-                    // Tracking: fuse translation only (infinite heading sigma -- Pigeon owns
-                    // rotation). sigma = 0.05 + 0.02*d^2 (0.07 m at 1 m, 0.37 m at 4 m).
-                    double xyStdDev = 0.05 + 0.02 * estimate.avgTagDist * estimate.avgTagDist;
+                    m_lastPassVisionTime = visionNow;
+                    // Timestamped XY fusion corrects even large odometry drift on the
+                    // first valid frame. Single tags retain slightly higher uncertainty.
+                    // Infinite heading sigma leaves rotation with the Pigeon.
+                    double xyStdDev = estimate.tagCount == 1 ? 0.019 : 0.015;
                     addVisionMeasurement(
                         estimate.pose,
                         estimate.timestampSeconds,
@@ -562,6 +574,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
             SmartDashboard.putBoolean("Localization/FMS attached", DriverStation.isFMSAttached());
             SmartDashboard.putBoolean("Localization/Position initialized", m_localization.positionKnown());
             SmartDashboard.putBoolean("Localization/Heading initialized", m_localization.headingKnown());
+            SmartDashboard.putBoolean("Passing/CornerAimAvailable", isPassPoseTrustworthy());
             SmartDashboard.putBoolean("Localization/Ready to aim", isFieldAimingReady());
             SmartDashboard.putString("Localization/Vision status", m_localization.status());
             SmartDashboard.putString("Localization/Aim status", isFieldAimingReady()

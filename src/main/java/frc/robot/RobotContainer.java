@@ -78,6 +78,10 @@ public class RobotContainer {
       .withDeadband(Constants.kMaxSpeed * 0.1)
       .withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
       .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+  private final SwerveRequest.RobotCentric robotRelativeDriveRequest = new SwerveRequest.RobotCentric()
+      .withDeadband(Constants.kMaxSpeed * 0.1)
+      .withRotationalDeadband(Constants.kMaxAngularRate * 0.1)
+      .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
   // Shared heading-locked request for the driver assists (trench + tower sweep).
   // PID configured once in configureBindings().
@@ -325,14 +329,14 @@ public class RobotContainer {
             m_shooter, m_lintake
         )
     );
-    // Smart pass: heading-locks to the alliance-zone corner on the robot's current side
-    // of the field, spins to the distance-interpolated ferry speed, and feeds once
-    // actually spun up + aimed (2 s force-feed backstop).
+    // Use field-pose corner aim while recently vision-checked. Fall back to a
+    // driver-aimed near pass as soon as that position becomes untrustworthy.
     m_controller.povUp().and(teleop).whileTrue(
-        Commands.parallel(
-            m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity, this::driverRotationalRate),
-            heldPassCommand()
-        )
+        Commands.either(
+            Commands.sequence(aimedPassCommand().until(() -> !m_drivetrain.isPassPoseTrustworthy()),
+                manualNearPassCommand()),
+            manualNearPassCommand(),
+            m_drivetrain::isPassPoseTrustworthy)
     );
     // Manual flat-out ferry kept as a fallback (fixed 90 RPS, no aim assist).
     m_controller.povRight().and(teleop).whileTrue(
@@ -612,7 +616,7 @@ public class RobotContainer {
           if (towerPreset) m_shooter.startTowerShot();
           else m_shooter.startVisionShot();
         }, m_shooter),
-        Commands.waitUntil(m_shooter::readyToShoot).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
+        Commands.waitUntil(m_shooter::readyForFirstFeed).withTimeout(ShooterConstants.kShotSpinupTimeoutSeconds),
         m_shooter.feedWithRecoveryCommand()
     );
     return Commands.parallel(
@@ -621,7 +625,7 @@ public class RobotContainer {
             .withVelocityX(shootingXVelocity()).withVelocityY(shootingYVelocity())
             .withRotationalRate(driverRotationalRate()))
             : m_drivetrain.faceHubCommand(this::shootingXVelocity, this::shootingYVelocity, this::driverRotationalRate),
-        rumbleWhenReady(m_shooter::readyToShoot)
+        rumbleWhenReady(m_shooter::readyForFirstFeed)
     ).finallyDo(() -> {
       stopShooter();
       m_lintake.setPinionState(PinionState.GROUND);
@@ -631,20 +635,35 @@ public class RobotContainer {
 
   // === Held pass (teleop) ===
   // Same shape as heldShotCommand, but gated on readyToPass() -- flywheel at the
-  // distance-interpolated ferry speed, pivot at the flatter-than-LOB pass angle
-  // (backspin bounce-back mitigation; see ShooterConstants.kPassPivotPosition), aimed
-  // at the pass corner -- so passes fire on actual spin-up. Longer timeout backstop:
-  // ferry speeds are higher, so spin-up takes longer than a hub shot's.
+  // distance-interpolated ferry speed, pivot at the flatter-than-LOB pass angle,
+  // aimed at the pass corner. Wait for actual readiness; never fire by timeout.
   private Command heldPassCommand() {
     return Commands.deadline(
         Commands.sequence(
             prepareShotCommand(PivotState.PASS, ShooterState.PASS),
-            Commands.waitUntil(m_shooter::readyToPass).withTimeout(ShooterConstants.kPassSpinupTimeoutSeconds),
+            Commands.waitUntil(m_shooter::readyToPass),
             m_shooter.feedWithRecoveryCommand()
         ),
         lintakePumpCommand()
-    ).onlyWhile(m_drivetrain::isFieldAimingReady)
-        .finallyDo(interrupted -> stopShooter()).onlyIf(m_drivetrain::isFieldAimingReady);
+    ).beforeStarting(() -> SmartDashboard.putString("Shooter/ControlMode", "AUTO CORNER PASS"))
+        .finallyDo(interrupted -> stopShooter());
+  }
+
+  private Command aimedPassCommand() {
+    return Commands.parallel(
+        m_drivetrain.facePassTargetCommand(this::driverXVelocity, this::driverYVelocity, this::driverRotationalRate),
+        heldPassCommand());
+  }
+
+  private Command manualNearPassCommand() {
+    return Commands.parallel(
+        m_drivetrain.applyRequest(() -> robotRelativeDriveRequest
+            .withVelocityX(driverXVelocity()).withVelocityY(driverYVelocity())
+            .withRotationalRate(driverRotationalRate())),
+        Commands.deadline(
+            Commands.sequence(Commands.runOnce(m_shooter::startManualNearPass, m_shooter),
+                Commands.waitUntil(m_shooter::readyToPass), m_shooter.feedWithRecoveryCommand()),
+            lintakePumpCommand()).finallyDo(() -> stopShooter()));
   }
 
   // === Shot prep ===

@@ -69,6 +69,32 @@ class AutoAimDriveIntegrationTest {
       assertTrue(request.RotationalRate > 0, "Positive CCW correction for target on robot's left");
       assertTrue(request.RotationalRate <= ShooterConstants.kVisionAimMaxOmega);
       assertEquals("Aligning chassis to hub", drive.getVisionFeedBlockReason());
+      // Deliberately corrupt the global estimator, not the independent camera.
+      // These are injected faults, not a prediction of actual wheel slip.
+      double maxInjectedError = 0;
+      for (Pose2d corrupt : new Pose2d[] {
+          new Pose2d(hub.getX() + (red ? 2 : -2), hub.getY() + 1, Rotation2d.fromDegrees(70)),
+          new Pose2d(8, .5, Rotation2d.fromDegrees(-120)),
+          new Pose2d(red ? 1.5 : 15, 7, Rotation2d.fromDegrees(red ? 0 : 180)),
+          new Pose2d(0, 0, Rotation2d.fromDegrees(179))}) {
+        drive.resetPose(corrupt);
+        maxInjectedError = Math.max(maxInjectedError, corrupt.getTranslation().getDistance(
+            new edu.wpi.first.math.geometry.Translation2d(hub.getX() + (red ? 3 : -3), hub.getY())));
+        for (int i = 0; i < 3; i++) {
+          publisher.set(new double[] {hub.getX() + (red ? 3 : -3), hub.getY(), 0, 0, 0,
+              (red ? 180 : 0) - 15, 10, 1, 0, 2, .5,
+              red ? 16 : 31, 0, 0, .5, 2, 2, .05});
+          drive.periodic();
+          command.execute();
+          assertEquals(3, drive.getVisionAim().distanceMeters(), .001);
+          assertEquals(15, drive.getVisionAimErrorDegrees(), .01);
+          assertTrue(request.RotationalRate > 0, "Estimator corruption must not reverse actual turn request");
+          Timer.delay(.02);
+        }
+      }
+      System.out.printf(java.util.Locale.ROOT,
+          "DRIFT_NATIVE %s: injected global XY error %.3f m; relative range 3.000 m; turn error +15 deg retained%n",
+          station, maxInjectedError);
       manualRotation[0] = -.9;
       command.execute();
       assertEquals(-.9, request.RotationalRate, 1e-9);

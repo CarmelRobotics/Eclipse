@@ -2,6 +2,7 @@ package frc.robot.subsystems.localisation;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import frc.robot.subsystems.shooter.ShooterConstants;
@@ -17,9 +18,6 @@ public final class FieldLocalization {
   private boolean positionKnown;
   private boolean headingKnown;
   private double lastTimestamp = Double.NEGATIVE_INFINITY;
-  private Pose2d pendingPose;
-  private double pendingSince;
-  private int pendingFrames;
   private String status = "Waiting for a field position and heading";
 
   public void observeAlliance(Optional<Alliance> reported, boolean fms, boolean disabled,
@@ -31,7 +29,6 @@ public final class FieldLocalization {
       startingAlliance = reported;
       // At staging, robots start on their own half. This is NOT a constraint during play.
       if (!onStartingHalf(currentPose)) positionKnown = false;
-      clearPending();
     }
   }
 
@@ -39,7 +36,6 @@ public final class FieldLocalization {
   public void prepareForMatch(Pose2d currentPose, boolean fms) {
     startingAlliance = fms ? alliance : Optional.empty();
     if (!onStartingHalf(currentPose)) positionKnown = false;
-    clearPending();
   }
 
   public Optional<Alliance> alliance() { return alliance; }
@@ -58,7 +54,6 @@ public final class FieldLocalization {
     positionKnown = inField(pose);
     headingKnown = positionKnown;
     startingAlliance = Optional.empty();
-    clearPending();
     status = positionKnown ? "Full field pose initialized" : "Invalid explicit pose";
   }
 
@@ -98,45 +93,34 @@ public final class FieldLocalization {
     if (!positionKnown && !onStartingHalf(estimate.pose)) {
       return reject("Wrong starting half: check Limelight field map/tag IDs", true);
     }
-    double delta = estimate.pose.getTranslation().getDistance(currentPose.getTranslation());
-    if (positionKnown && delta <= ShooterConstants.kMaxVisionCorrectionMeters) {
-      clearPending();
-      status = "Fusing blue-origin vision; gyro owns heading";
+    // Compare positions at approximately the same time. At full speed, a valid
+    // camera pose can be more than a meter behind the current odometry pose.
+    double age = Math.max(0, now - estimate.timestampSeconds);
+    Translation2d fieldVelocity = new Translation2d(
+        speeds.vxMetersPerSecond, speeds.vyMetersPerSecond).rotateBy(currentPose.getRotation());
+    Translation2d predictedVisionNow = estimate.pose.getTranslation().plus(fieldVelocity.times(age));
+    Translation2d visionOffset = predictedVisionNow.minus(currentPose.getTranslation());
+    double delta = visionOffset.getNorm();
+    // A mirrored field solution can have plausible tag metadata. Only use camera
+    // heading as a cross-check for a large XY jump; the gyro still owns heading.
+    if (positionKnown && delta > ShooterConstants.kMaxVisionCorrectionMeters
+        && Math.abs(estimate.pose.getRotation().minus(currentPose.getRotation()).getDegrees()) > 45) {
+      return reject("Large vision correction disagrees with gyro heading", true);
+    }
+    if (positionKnown) {
+      status = "Fusing validated vision XY immediately; gyro owns heading";
       return Update.FUSE;
-    }
-    // Never teleport a trusted pose across the field during play. A missing tag
-    // leaves odometry running; a bad tag must not replace that odometry wholesale.
-    if (positionKnown && !disabled) return reject("Large enabled vision jump rejected", true);
-    if (Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond) > 0.25
-        || Math.abs(speeds.omegaRadiansPerSecond) > Math.toRadians(15)) {
-      return reject("Stop moving to initialize/relocalize position", true);
-    }
-    // A reset needs multiple distinct, consistent frames, not repeated reads of one frame.
-    if (pendingPose == null
-        || pendingPose.getTranslation().getDistance(estimate.pose.getTranslation()) > 0.15) {
-      pendingPose = estimate.pose;
-      pendingSince = estimate.timestampSeconds;
-      pendingFrames = 1;
-    } else {
-      pendingFrames++;
-    }
-    if (pendingFrames < 4 || estimate.timestampSeconds - pendingSince < 0.10) {
-      return reject("Confirming stationary vision position", false);
     }
     positionKnown = true;
     startingAlliance = Optional.empty();
-    clearPending();
     status = "Position initialized; gyro heading retained";
     return Update.SEED_TRANSLATION;
   }
 
   private Update reject(String reason, boolean clear) {
     status = reason;
-    if (clear) clearPending();
     return Update.REJECT;
   }
-
-  private void clearPending() { pendingPose = null; pendingFrames = 0; }
 
   private boolean onStartingHalf(Pose2d pose) {
     if (startingAlliance.isEmpty()) return true;

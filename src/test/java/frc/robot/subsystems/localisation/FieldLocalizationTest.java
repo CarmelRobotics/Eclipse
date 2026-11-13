@@ -35,7 +35,8 @@ class FieldLocalizationTest {
 
   @Test void correctRedVisionAcquiresPositionWithoutAutoButDoesNotInventHeading() {
     var guard = staged(Alliance.Red);
-    confirm(guard, RED, true);
+    assertEquals(FieldLocalization.Update.SEED_TRANSLATION,
+        guard.evaluate(frame(RED, 1), 1, Pose2d.kZero, STOPPED, true));
     assertTrue(guard.positionKnown());
     assertFalse(guard.headingKnown());
     assertFalse(guard.readyToAim());
@@ -81,7 +82,53 @@ class FieldLocalizationTest {
           guard.evaluate(frame(BLUE, time), time, RED, STOPPED, false));
     }
     assertTrue(guard.readyToAim(), "Reject bad vision, not the already-known odometry");
-    assertTrue(guard.status().contains("Large enabled vision jump"));
+    assertTrue(guard.status().contains("gyro heading"));
+  }
+
+  @Test void closeConsistentMultiTagVisionRecoversFromOutOfFieldOdometryWhileMoving() {
+    var guard = staged(Alliance.Red);
+    guard.seedPose(RED);
+    // Robot-relative -X is field +X when the gyro points 180 degrees.
+    var motion = new ChassisSpeeds(-2, 0, 0);
+    for (int i = 0; i < 4; i++) {
+      double now = 1 + .04 * i;
+      double capturedAt = now - .05;
+      var vision = frame(new Pose2d(14 + 2 * (capturedAt - 1), 2, Rotation2d.k180deg), capturedAt);
+      var badOdometry = new Pose2d(15.5 + 2 * (now - 1), 8.3, Rotation2d.k180deg);
+      assertEquals(FieldLocalization.Update.FUSE,
+          guard.evaluate(vision, now, badOdometry, motion, false));
+    }
+    assertTrue(guard.readyToAim());
+    assertTrue(guard.status().contains("immediately"));
+  }
+
+  @Test void closeConsistentSingleTagVisionAlsoRecoversLargeDrift() {
+    var guard = staged(Alliance.Red);
+    guard.seedPose(RED);
+    var wrongOdometry = new Pose2d(15, 7, Rotation2d.k180deg);
+    for (int i = 0; i < 5; i++) {
+      double time = 1 + .04 * i;
+      assertEquals(FieldLocalization.Update.FUSE,
+          guard.evaluate(singleFrame(RED, time, .08), time, wrongOdometry, STOPPED, false));
+    }
+    assertTrue(guard.status().contains("immediately"));
+  }
+
+  @Test void largeVisionCorrectionAcceptsValidatedSingleAndMultiTagFramesImmediately() {
+    var guard = staged(Alliance.Red);
+    guard.seedPose(RED);
+    var wrongOdometry = new Pose2d(15, 7, Rotation2d.k180deg);
+    assertEquals(FieldLocalization.Update.FUSE,
+        guard.evaluate(singleFrame(RED, 1, .19), 1, wrongOdometry, STOPPED, false));
+    for (int i = 0; i < 3; i++) {
+      double time = 1.1 + .04 * i;
+      assertEquals(FieldLocalization.Update.FUSE,
+          guard.evaluate(frame(RED, time), time, wrongOdometry, STOPPED, false));
+    }
+    assertEquals(FieldLocalization.Update.FUSE,
+        guard.evaluate(frame(new Pose2d(13.2, 2, Rotation2d.k180deg), 1.22), 1.22,
+            wrongOdometry, STOPPED, false));
+    assertTrue(guard.status().contains("immediately"));
   }
 
   @Test void crossingMidfieldDuringPlayDoesNotMirrorOrRejectTheOtherHalf() {
@@ -101,20 +148,15 @@ class FieldLocalizationTest {
     assertTrue(guard.readyToAim());
   }
 
-  @Test void stationaryRelocalizationNeedsDistinctConsistentFrames() {
+  @Test void firstValidVisionFrameSeedsPositionWithoutInventingHeading() {
     var guard = staged(Alliance.Red);
     var sample = frame(RED, 1);
-    for (int i = 0; i < 10; i++) {
-      assertEquals(FieldLocalization.Update.REJECT,
-          guard.evaluate(sample, 1 + i * .01, Pose2d.kZero, STOPPED, true));
-    }
-    assertFalse(guard.positionKnown(), "Repeated reads of one image are not confirmation");
-    for (int i = 1; i <= 3; i++) {
-      double time = 1 + .04 * i;
-      var update = guard.evaluate(frame(RED, time), time, Pose2d.kZero, STOPPED, true);
-      assertEquals(i == 3 ? FieldLocalization.Update.SEED_TRANSLATION
-          : FieldLocalization.Update.REJECT, update);
-    }
+    assertEquals(FieldLocalization.Update.SEED_TRANSLATION,
+        guard.evaluate(sample, 1, Pose2d.kZero, new ChassisSpeeds(2, 0, 0), false));
+    assertTrue(guard.positionKnown());
+    assertFalse(guard.headingKnown());
+    assertEquals(FieldLocalization.Update.REJECT,
+        guard.evaluate(sample, 1.02, Pose2d.kZero, STOPPED, false));
   }
 
   @Test void rejectsStaleFutureNonfiniteOutOfBoundsAndUncertainSingleTags() {
@@ -138,11 +180,11 @@ class FieldLocalizationTest {
     assertFalse(guard.positionKnown());
   }
 
-  @Test void movingRobotCannotAcquireAnUnreferencedPosition() {
+  @Test void movingRobotCanAcquirePositionFromValidVision() {
     var guard = staged(Alliance.Red);
-    assertEquals(FieldLocalization.Update.REJECT,
+    assertEquals(FieldLocalization.Update.SEED_TRANSLATION,
         guard.evaluate(frame(RED, 1), 1, Pose2d.kZero, new ChassisSpeeds(2, 0, 0), false));
-    assertFalse(guard.positionKnown());
+    assertTrue(guard.positionKnown());
   }
 
   @Test void fieldHeadingResetIsIndependentOfReversedDriverPerspective() {
@@ -157,17 +199,17 @@ class FieldLocalizationTest {
     return guard;
   }
 
-  private static void confirm(FieldLocalization guard, Pose2d pose, boolean disabled) {
-    for (int i = 0; i < 4; i++) {
-      double time = 1 + .04 * i;
-      var update = guard.evaluate(frame(pose, time), time, Pose2d.kZero, STOPPED, disabled);
-      assertEquals(i == 3 ? FieldLocalization.Update.SEED_TRANSLATION
-          : FieldLocalization.Update.REJECT, update);
-    }
-  }
-
   static LimelightHelpers.PoseEstimate frame(Pose2d pose, double time) {
     return new LimelightHelpers.PoseEstimate(pose, time, 20, 2, 1, 2, .5,
         new LimelightHelpers.RawFiducial[0], false);
+  }
+
+  private static LimelightHelpers.PoseEstimate singleFrame(Pose2d pose, double time,
+      double ambiguity) {
+    var estimate = frame(pose, time);
+    estimate.tagCount = 1;
+    estimate.rawFiducials = new LimelightHelpers.RawFiducial[] {
+        new LimelightHelpers.RawFiducial(1, 0, 0, .5, 2, 2, ambiguity)};
+    return estimate;
   }
 }

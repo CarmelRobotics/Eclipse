@@ -5,7 +5,7 @@ package frc.robot.subsystems.power;
  * Drive supply is controlled exclusively by DriveCurrentPolicy (91 A auto / 40 A other).
  */
 public enum PowerMode {
-  IDLE(35),
+  IDLE(40),
   SCORING(50),
   SPRINT(20),
   AUTO(45);

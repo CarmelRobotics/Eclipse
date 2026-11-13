@@ -74,6 +74,7 @@ public final class ShooterConstants {
     public static final double kIdleShedVoltage = 7.0;
     public static final double kLobShooterRps = 40;          // ferry shot (slower pass through field)
     public static final double kSendShooterRps = 90;         // long ferry shot (fast pass)
+    public static final double kManualNearPassRps = 37.0;    // field-tune at roughly 5 m
     public static final double kStowPivotPosition = 0;       // stow angle (output rotations)
     // LOB/SEND pivot: full feedable travel (~25°) for flattest kicker-feedable launch.
     // 25 deg is the kicker FEED limit, not a travel limit -- the pivot travels much
@@ -107,7 +108,7 @@ public final class ShooterConstants {
     public static final String kIndexerCurrentTimeoutKey = "ShotTuning/IndexerCurrentTimeoutS";
 
     // ===== Indexer/kicker =====
-    public static final double kIndexerScoreVolts = -4.5;   // negative = feed the ball into the drum
+    public static final double kIndexerScoreVolts = -8.0;   // negative = feed the ball into the drum
 
     // ===== Readiness gates (shot preconditions) =====
     // These four gates form a conjunctive (AND) precondition for readyToShoot(). Each is
@@ -136,6 +137,8 @@ public final class ShooterConstants {
     // Accounts for ripple from the velocity PID and CAN-bus quantization (0.25 RPS units).
     // Too tight: noisy, waits forever. Too loose: inconsistent exit speed.
     public static final double kShooterReadyToleranceRps = 3.0;
+    // A brief in-tolerance crossing during spin-up is not a settled flywheel.
+    public static final double kFirstFeedStableSeconds = 0.25;
 
     // Pivot readiness: within 0.04 output rotations (~14.4°). The pivot is geared 42:1,
     // so 0.04 rot ≈ 1.68 motor rotations. Accounts for sensor noise (±0.01 rot), gear
@@ -355,13 +358,13 @@ public final class ShooterConstants {
 
         // Supply limit protects the bus voltage (and the main breaker) during spin-up and
         // shot spikes -- this is what most directly helps VelocityVoltage hold speed,
-        // since it keeps battery sag from eating the voltage command. 35 A x 4 motors
-        // caps the flywheel at 140 A of battery draw (was 200 A at 50 each, which
+        // since it keeps battery sag from eating the voltage command. 40 A x 4 motors
+        // caps the flywheel at 160 A of battery draw (was 200 A at 50 each, which
         // stacked with an unlimited drivetrain into brownout territory). Spin-up gets a
         // touch slower; the 1.25 s / 2 s shot timeouts already cover it. Stator limit is
         // kept generous so recovery torque during the shot is never the bottleneck.
         private static final CurrentLimitsConfigs CurrentLimits = new CurrentLimitsConfigs()
-            .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(35)
+            .withSupplyCurrentLimitEnable(true).withSupplyCurrentLimit(40)
             .withStatorCurrentLimitEnable(true).withStatorCurrentLimit(100);
     }
 

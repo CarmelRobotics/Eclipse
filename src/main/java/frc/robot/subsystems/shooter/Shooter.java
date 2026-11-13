@@ -77,11 +77,14 @@ public class Shooter extends SubsystemBase {
     private double m_targetPivotPosition = ShooterConstants.kStowPivotPosition;  // in output (pivot) rotations
     private double m_targetShooterRps = ShooterConstants.kIdleShooterRps;
     private double m_targetPassRps = 30;  // distance-interpolated ferry speed
+    private boolean m_manualNearPass;
     private ManualShotPreset m_manualShot;
     private final VisionAimTracker m_visionAim;
     private boolean m_visionShot;
     private double m_visionPivotTrim, m_visionRpsTrim;
     private double m_feedPausedAt = Double.NaN;
+    private double m_firstFeedReadySince = Double.NaN;
+    private boolean m_hasFedThisShot;
 
     // ===== Protection =====
     // Overcurrent supervision on pivot and indexer: if supply current exceeds the limit
@@ -153,9 +156,9 @@ public class Shooter extends SubsystemBase {
     //     control lag. If the wheel never recovers, m_inDip stays true forever, preventing
     //     a false "multiple shots" count.
     //
-    // DESIGN: Why not use a beam break? Because we don't have one, and the velocity dip
-    // is reliable enough for scoring. The dip is *mechanical* (actual friction), not
-    // electrical (code-detectable), so it's robust to CAN lag and processor jitter.
+    // This is diagnostic only. Competition fuel often causes dips smaller than 5 RPS,
+    // so missing a dip must not reverse or stop the indexer. A beam break would be
+    // needed to confirm whether fuel actually advanced through the throat.
     //
     // EDGE CASES:
     //   1. Multiple balls: each ball = one dip → one count. Works automatically.
@@ -174,19 +177,16 @@ public class Shooter extends SubsystemBase {
     private final LoggedTunableNumber m_shotRecoverRps = new LoggedTunableNumber("ShotTuning/ShotRecoverRps", 2.0);
     private final LoggedTunableNumber m_noShotRecoveryTimeout =
         new LoggedTunableNumber("ShotTuning/NoShotRecoveryTimeout", 1.0);
-    private final LoggedTunableNumber m_jamReverseDuration =
-        new LoggedTunableNumber("ShotTuning/JamReverseDuration", 0.18);
-    private final LoggedTunableNumber m_maxRecoveryAttempts =
-        new LoggedTunableNumber("ShotTuning/MaxRecoveryAttempts", 50.0);
     private int m_shotCount = 0;
     private boolean m_shotArmed = false;   // wheel has reached target velocity at least once; ready to detect dips
     private boolean m_inDip = false;       // currently experiencing a dip (ball in flight or stuck)
 
-    private enum FeedRecoveryPhase { IDLE, FEEDING, REVERSING, FAULT }
+    private enum FeedRecoveryPhase { IDLE, FEEDING }
     private FeedRecoveryPhase m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
     private double m_feedRecoveryPhaseStart = 0.0;
     private int m_feedRecoveryBaselineShotCount = 0;
     private int m_feedRecoveryAttempts = 0;
+    private boolean m_indexerOvercurrentTripped;
 
     private final CommandSwerveDrivetrain m_drive;
 
@@ -280,13 +280,23 @@ public class Shooter extends SubsystemBase {
     public void setState(ShooterState shooterState) {
         m_manualShot = null;
         m_visionShot = false;
+        m_manualNearPass = false;
         m_shooterState = shooterState;
+    }
+
+    /** Driver-aimed near pass when the field position is unreliable. */
+    public void startManualNearPass() {
+        setState(IndexerState.ZERO, PivotState.PASS, ShooterState.PASS);
+        m_manualNearPass = true;
+        SmartDashboard.putString("Shooter/ControlMode", "MANUAL NEAR PASS - robot-relative drive");
     }
 
     /** Shared validated vision controls range and chassis aim; no automatic tower fallback. */
     public void startVisionShot() {
         setState(IndexerState.ZERO, PivotState.SCORE, ShooterState.SCORE);
         m_visionShot = true;
+        m_firstFeedReadySince = Double.NaN;
+        m_hasFedThisShot = false;
         m_visionPivotTrim = m_pivotOffset.get();
         m_visionRpsTrim = m_shooterRpsOffset.get();
         // Visible pre-spin while acquiring, never a blind scoring preset or permission to feed.
@@ -300,6 +310,8 @@ public class Shooter extends SubsystemBase {
     public void startTowerShot() {
         setState(IndexerState.ZERO, PivotState.SCORE, ShooterState.SCORE);
         m_manualShot = ManualShotPreset.tower(m_pivotOffset.get(), m_shooterRpsOffset.get());
+        m_firstFeedReadySince = Double.NaN;
+        m_hasFedThisShot = false;
         m_targetPivotPosition = m_manualShot.pivotRotations();
         m_targetShooterRps = m_manualShot.wheelRps();
         SmartDashboard.putString("Shooter/ControlMode", "TOWER PRESET - aim with right stick");
@@ -328,7 +340,7 @@ public class Shooter extends SubsystemBase {
     // damage if a mechanical jam (pinch point) is involved.
     //
     // SPEEDS: Flywheel at -10 RPS (slow backout) via the REVERSE ShooterState. Indexer
-    // at +4.5 V (opposite of -4.5 V feed) via the REVERSE IndexerState. Both stop on
+    // at +8.5 V (opposite of -8 V feed) via the REVERSE IndexerState. Both stop on
     // button release (states reset to default; periodic() stops the motors).
     public Command clearJamCommand() {
         return Commands.runEnd(
@@ -344,7 +356,7 @@ public class Shooter extends SubsystemBase {
         );
     }
 
-    /** Feeds continuously and automatically reverses the indexer if no shot is detected. */
+    /** Feeds while held. A missed velocity dip is only an advisory, not proof of a jam. */
     public Command feedWithRecoveryCommand() {
         return Commands.runEnd(
             this::runFeedWithRecovery,
@@ -355,14 +367,19 @@ public class Shooter extends SubsystemBase {
 
     private void runFeedWithRecovery() {
         double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        if (m_indexerOvercurrentTripped) {
+            setState(IndexerState.ZERO);
+            SmartDashboard.putString("shooter/feed recovery", "ELECTRICAL FAULT - release trigger");
+            return;
+        }
         // A timeout must NEVER force-feed a vision shot with missing/stale range.
         // Recheck mechanical readiness as the live distance/targets change.
-        if (m_visionShot && !readyToShoot()) {
+        if (m_visionShot && !(m_hasFedThisShot ? readyToShoot() : readyForFirstFeed())) {
             if (!Double.isFinite(m_feedPausedAt)) m_feedPausedAt = now;
             setState(IndexerState.ZERO);
             return;
         }
-        // A transient aim/RPS pause must not erase the jam retry budget or make
+        // A transient aim/RPS pause must not make
         // the no-shot timer count time in which we deliberately were not feeding.
         if (Double.isFinite(m_feedPausedAt)) {
             m_feedRecoveryPhaseStart += now - m_feedPausedAt;
@@ -373,40 +390,26 @@ public class Shooter extends SubsystemBase {
             m_feedRecoveryPhaseStart = now;
             m_feedRecoveryBaselineShotCount = m_shotCount;
             m_feedRecoveryAttempts = 0;
+            SmartDashboard.putString("shooter/feed recovery", "FEEDING");
         }
 
         switch (m_feedRecoveryPhase) {
             case FEEDING -> {
                 setState(IndexerState.SCORE);
+                m_hasFedThisShot = true;
                 if (m_shotCount > m_feedRecoveryBaselineShotCount) {
-                    // A real shot proves the feed path is moving. Start a fresh
-                    // no-shot window and forget prior recovery attempts.
+                    // A detected shot clears the advisory. Missing a tiny velocity
+                    // dip cannot prove that fuel is stuck in the throat.
                     m_feedRecoveryBaselineShotCount = m_shotCount;
                     m_feedRecoveryPhaseStart = now;
                     m_feedRecoveryAttempts = 0;
+                    SmartDashboard.putString("shooter/feed recovery", "FEEDING");
                 } else if (now - m_feedRecoveryPhaseStart >= m_noShotRecoveryTimeout.get()) {
-                    if (m_feedRecoveryAttempts >= Math.round(m_maxRecoveryAttempts.get())) {
-                        m_feedRecoveryPhase = FeedRecoveryPhase.FAULT;
-                        setState(IndexerState.ZERO);
-                        SmartDashboard.putString("shooter/feed recovery", "FAULT - clear jam");
-                    } else {
-                        m_feedRecoveryAttempts++;
-                        m_feedRecoveryPhase = FeedRecoveryPhase.REVERSING;
-                        m_feedRecoveryPhaseStart = now;
-                        SmartDashboard.putString("shooter/feed recovery", "REVERSING");
-                    }
-                }
-            }
-            case REVERSING -> {
-                setState(IndexerState.REVERSE);
-                if (now - m_feedRecoveryPhaseStart >= m_jamReverseDuration.get()) {
-                    m_feedRecoveryPhase = FeedRecoveryPhase.FEEDING;
+                    m_feedRecoveryAttempts++;
                     m_feedRecoveryPhaseStart = now;
-                    m_feedRecoveryBaselineShotCount = m_shotCount;
-                    SmartDashboard.putString("shooter/feed recovery", "RETRYING");
+                    SmartDashboard.putString("shooter/feed recovery", "POSSIBLE SLIP - still feeding");
                 }
             }
-            case FAULT -> setState(IndexerState.ZERO);
             case IDLE -> { /* initialized above */ }
         }
         if (diagLoop()) {
@@ -420,6 +423,12 @@ public class Shooter extends SubsystemBase {
         m_feedRecoveryPhase = FeedRecoveryPhase.IDLE;
         m_feedRecoveryAttempts = 0;
         m_feedPausedAt = Double.NaN;
+        m_firstFeedReadySince = Double.NaN;
+        m_hasFedThisShot = false;
+        m_indexerOvercurrentTripped = false;
+        m_indexerOvercurrentStartTime = 0;
+        SmartDashboard.putBoolean("indexer overcurrent tripped", false);
+        SmartDashboard.putString("shooter/feed recovery", "IDLE");
     }
 
     // === Active self-test (pit motor test) ===
@@ -540,6 +549,7 @@ public class Shooter extends SubsystemBase {
     }
 
     public boolean readyToShoot() {
+        if (m_indexerOvercurrentTripped) return false;
         boolean manual = isManualShotActive();
         boolean shotInRange = manual || (m_visionShot ? m_visionAim.inRange()
             : m_drive.getShotDistance() <= ShooterConstants.kMaxShotDistanceMeters);
@@ -566,11 +576,27 @@ public class Shooter extends SubsystemBase {
 
         return (manual || (m_visionShot ? m_visionAim.inRange() : m_drive.isFieldAimingReady()))
             && shotInRange && aimed && shooterReady && pivotReady
-            && (!m_visionShot || visionMechanismBlockReason().equals("Ready"));
+            && (!(m_visionShot || manual) || visionMechanismBlockReason().equals("Ready"));
+    }
+
+    /** The first fuel waits for all wheels and both pivot sides to settle at target. */
+    public boolean readyForFirstFeed() {
+        // A brief aim/vision flicker should block that instant's shot, but should
+        // not erase time the mechanisms have already spent at speed.
+        boolean mechanismsReady = visionMechanismBlockReason().equals("Ready");
+        if (!mechanismsReady) {
+            m_firstFeedReadySince = Double.NaN;
+            return false;
+        }
+        double now = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+        if (!Double.isFinite(m_firstFeedReadySince)) m_firstFeedReadySince = now;
+        return now - m_firstFeedReadySince >= ShooterConstants.kFirstFeedStableSeconds
+            && readyToShoot();
     }
 
     /** Vision shots do not bypass a dead follower, stale encoder, or an unsettled pivot. */
     private String visionMechanismBlockReason() {
+        if (m_indexerOvercurrentTripped) return "Indexer electrical fault - release trigger";
         for (int i = 0; i < m_shotWheels.length; i++) {
             var velocity = m_shotWheels[i].getVelocity();
             double actual = velocity.getValueAsDouble();
@@ -598,12 +624,13 @@ public class Shooter extends SubsystemBase {
     // pass angle, and heading within the wider pass tolerance of the landing-corner
     // bearing. This is what lets passes fire on actual spin-up instead of a blind timeout.
     public boolean readyToPass() {
+        if (m_indexerOvercurrentTripped) return false;
         boolean spunUp = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble() - m_targetPassRps)
             <= ShooterConstants.kShooterReadyToleranceRps;
         double currentPivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble() / ShooterConstants.kPivotGearRatio;
         boolean pivotReady = Math.abs(currentPivotOutputRot - m_passPivotPosition.get())
             <= ShooterConstants.kPivotReadyToleranceRotations;
-        boolean aimed = !m_drive.isAutoAlignmentEnabled() || Math.abs(m_drive.getPassHeadingError().getDegrees())
+        boolean aimed = m_manualNearPass || !m_drive.isAutoAlignmentEnabled() || Math.abs(m_drive.getPassHeadingError().getDegrees())
             <= ShooterConstants.kPassHeadingToleranceDegrees;
 
         if (diagLoop()) {
@@ -612,11 +639,12 @@ public class Shooter extends SubsystemBase {
             SmartDashboard.putBoolean("ready/pass pivot", pivotReady);
         }
 
-        return m_drive.isFieldAimingReady() && spunUp && pivotReady && aimed;
+        return (m_manualNearPass || m_drive.isPassPoseTrustworthy()) && spunUp && pivotReady && aimed;
     }
 
     // SEND is a fixed-speed manual ferry, not the distance-interpolated SCORE solution.
     public boolean readyToFerry() {
+        if (m_indexerOvercurrentTripped) return false;
         boolean spunUp = Math.abs(m_leftLeaderShooterMotor.getVelocity().getValueAsDouble()
             - ShooterConstants.kSendShooterRps) <= ShooterConstants.kShooterReadyToleranceRps;
         double pivotOutputRot = m_leaderPivotMotor.getPosition().getValueAsDouble()
@@ -694,7 +722,8 @@ public class Shooter extends SubsystemBase {
             m_targetPivotPosition = m_manualShot.pivotRotations();
             m_targetShooterRps = m_manualShot.wheelRps();
         }
-        m_targetPassRps = ShooterConstants.getPassRps(m_drive.getPassDistance()) + m_passRpsOffset.get();
+        m_targetPassRps = (m_manualNearPass ? ShooterConstants.kManualNearPassRps
+            : ShooterConstants.getPassRps(m_drive.getPassDistance())) + m_passRpsOffset.get();
 
         // === Live flywheel gain re-tuning ===
         // Check each gain independently for changes (don't use || short-circuit; each
@@ -868,7 +897,7 @@ public class Shooter extends SubsystemBase {
         // catastrophic, but it draws power and may coerce the battery if it persists.
         //
         // THRESHOLD:
-        //   m_indexerCurrentLimit (default 25 A): The indexer is a Kraken X44 at ±4.5 V
+        //   m_indexerCurrentLimit (default 25 A): The indexer is a Kraken X44 at -8 V feed
         //     (direct voltage, no closed loop). Normal feeding is ~5–10 A. Stall is ~80 A.
         //     The 25 A threshold is well above normal, catching genuine jams.
         //   m_indexerCurrentTimeout (default 0.2 s): A jam is instantaneous; 0.2 s is plenty
@@ -883,9 +912,10 @@ public class Shooter extends SubsystemBase {
         if (indexerCurrent > indexerLimit) {
             if (m_indexerOvercurrentStartTime == 0) m_indexerOvercurrentStartTime = now;
             else if (now - m_indexerOvercurrentStartTime > indexerTimeout) {
-                // stop feeding
+                // Real sustained electrical overload: latch off until trigger release.
                 m_indexerMotor.setVoltage(0);
                 m_indexerState = IndexerState.ZERO;
+                m_indexerOvercurrentTripped = true;
                 SmartDashboard.putBoolean("indexer overcurrent tripped", true);
             }
         } else {
@@ -917,6 +947,8 @@ public class Shooter extends SubsystemBase {
             RobotLogger.log("Shooter/IndexerVolts", m_indexerState.volts);
             RobotLogger.log("Shooter/IndexerRps", m_indexerMotor.getVelocity().getValueAsDouble());
             RobotLogger.log("Shooter/ShotCount", m_shotCount);
+            RobotLogger.log("Shooter/FeedEvidenceWarnings", m_feedRecoveryAttempts);
+            RobotLogger.log("Shooter/IndexerElectricalFault", m_indexerOvercurrentTripped);
             RobotLogger.log("Shooter/BallInFlywheel", m_inDip);
             RobotLogger.log("Shooter/PivotState", m_pivotState.toString());
             RobotLogger.log("Shooter/ShooterState", m_shooterState.toString());
