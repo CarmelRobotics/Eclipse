@@ -665,7 +665,7 @@ public class Shooter extends SubsystemBase {
                 + m_pivotOffset.get();
             m_targetShooterRps = nominalRps + m_shooterRpsOffset.get();
         } else if (m_visionAim.inRange()) {
-            var preset = ManualShotPreset.create(shotDistance, m_visionPivotTrim, m_visionRpsTrim);
+            var preset = ManualShotPreset.vision(shotDistance, m_visionPivotTrim, m_visionRpsTrim);
             m_targetPivotPosition = preset.pivotRotations();
             m_targetShooterRps = preset.wheelRps();
         }

@@ -100,7 +100,7 @@ class TeleopShotRegressionTest {
       tickVision(scheduler, camera, 3.0, 10);
       assertFalse(drive.isFieldAimingReady(), "Vision-relative aim must not require a separate global heading seed");
       verifyRangeTargets(flywheel, pivot, 3.0, 0, 0);
-      var visionPreset = ManualShotPreset.create(3, 0, 0);
+      var visionPreset = ManualShotPreset.vision(3, 0, 0);
       for (int i = 0; i < 12; i++) {
         // Raw rotor simulation is pre-inversion; both leader motors are Clockwise_Positive.
         String[] wheelFields = {"m_leftLeaderShooterMotor", "m_backLeftFollowerShooterMotor",
@@ -292,12 +292,15 @@ class TeleopShotRegressionTest {
 
   private static void verifyTowerTargets(TalonFX flywheel, TalonFX pivot,
       double pivotTrim, double rpsTrim) {
-    verifyRangeTargets(flywheel, pivot, ShooterConstants.kTowerShotDistanceMeters, pivotTrim, rpsTrim);
+    verifyTargets(flywheel, pivot, ManualShotPreset.tower(pivotTrim, rpsTrim));
   }
 
   private static void verifyRangeTargets(TalonFX flywheel, TalonFX pivot, double distance,
       double pivotTrim, double rpsTrim) {
-    var expected = ManualShotPreset.create(distance, pivotTrim, rpsTrim);
+    verifyTargets(flywheel, pivot, ManualShotPreset.vision(distance, pivotTrim, rpsTrim));
+  }
+
+  private static void verifyTargets(TalonFX flywheel, TalonFX pivot, ManualShotPreset expected) {
     assertEquals(expected.wheelRps(),
         assertInstanceOf(VelocityVoltage.class, flywheel.getAppliedControl()).Velocity, .01);
     assertEquals(expected.pivotRotations() * ShooterConstants.kPivotGearRatio,
